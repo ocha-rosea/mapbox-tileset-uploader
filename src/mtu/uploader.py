@@ -4,13 +4,18 @@ Core uploader module for Mapbox Tileset operations.
 
 import json
 import os
+import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from click.testing import CliRunner
 import requests
 
 from mtu.converters import get_converter, get_supported_formats
@@ -22,8 +27,8 @@ from mtu.validators import GeometryValidator, ValidationResult
 class TilesetConfig:
     """Configuration for a tileset upload."""
 
-    tileset_id: str
-    tileset_name: str
+    tileset_id: str = ""
+    tileset_name: str = ""
     source_id: str | None = None
     layer_name: str = "data"
     min_zoom: int = 0
@@ -34,7 +39,7 @@ class TilesetConfig:
 
     def __post_init__(self) -> None:
         """Set defaults after initialization."""
-        if not self.source_id:
+        if self.tileset_id and not self.source_id:
             self.source_id = self.tileset_id.replace(".", "-")
 
 
@@ -107,6 +112,79 @@ class TilesetUploader:
 
         # Initialize validator
         self._validator = GeometryValidator() if validate_geometry else None
+        self._tilesets_command = self.find_tilesets_command()
+        self._use_inprocess_tilesets = False
+
+        if not self._tilesets_command:
+            self._use_inprocess_tilesets = self.can_use_inprocess_tilesets()
+
+        if not self._tilesets_command and not self._use_inprocess_tilesets:
+            raise ValueError(
+                "Mapbox tilesets CLI is required. Install mapbox-tilesets and ensure either "
+                "a working 'tilesets' command or Python module import is available."
+            )
+
+    @staticmethod
+    def find_tilesets_command() -> list[str] | None:
+        """Find a runnable tilesets CLI command in PATH or current Python environment."""
+        candidates = ["tilesets", "tilesets.exe", "mapbox-tilesets", "mapbox-tilesets.exe"]
+        command_candidates: list[list[str]] = []
+        is_frozen = bool(getattr(sys, "frozen", False))
+
+        for candidate in candidates:
+            found = shutil.which(candidate)
+            if found:
+                command_candidates.append([found])
+
+        scripts_dir = Path(sys.executable).parent
+        for candidate in candidates:
+            script_path = scripts_dir / candidate
+            if script_path.exists():
+                command_candidates.append([str(script_path)])
+
+        if not is_frozen:
+            command_candidates.append([sys.executable, "-m", "mapbox_tilesets.scripts.cli"])
+
+        for command in command_candidates:
+            if TilesetUploader._is_working_tilesets_command(command):
+                return command
+
+        return None
+
+    @staticmethod
+    def can_use_inprocess_tilesets() -> bool:
+        """Check if mapbox-tilesets CLI module can be invoked in-process."""
+        try:
+            from mapbox_tilesets.scripts.cli import cli as _cli  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
+    def _is_working_tilesets_command(command: list[str]) -> bool:
+        """Check if a tilesets command can execute."""
+        if bool(getattr(sys, "frozen", False)) and command:
+            cmd_path = Path(command[0]).resolve()
+            current_exe = Path(sys.executable).resolve()
+            if cmd_path == current_exe:
+                return False
+
+        try:
+            result = subprocess.run(
+                command + ["--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return False
+
+        stderr = (result.stderr or "").lower()
+        if "fatal error in launcher" in stderr:
+            return False
+
+        return result.returncode == 0
 
     def upload_from_url(
         self,
@@ -115,6 +193,7 @@ class TilesetUploader:
         format_hint: str | None = None,
         work_dir: str | None = None,
         dry_run: bool = False,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> UploadResult:
         """
         Download data from URL and upload to Mapbox.
@@ -145,6 +224,12 @@ class TilesetUploader:
         try:
             # Download the file
             self._download_file(url, download_path)
+            self._emit_progress(
+                progress_callback,
+                stage="download_complete",
+                message="Download complete",
+                percent=10,
+            )
 
             # Upload from the downloaded file
             return self.upload_from_file(
@@ -152,6 +237,7 @@ class TilesetUploader:
                 config,
                 format_hint=format_hint,
                 dry_run=dry_run,
+                progress_callback=progress_callback,
             )
 
         finally:
@@ -167,6 +253,7 @@ class TilesetUploader:
         config: TilesetConfig,
         format_hint: str | None = None,
         dry_run: bool = False,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> UploadResult:
         """
         Upload a GIS file to Mapbox.
@@ -181,6 +268,11 @@ class TilesetUploader:
             UploadResult with upload details.
         """
         file_path = Path(file_path)
+        self._ensure_config_ids(config)
+
+        if not config.tileset_id:
+            raise ValueError("tileset_id could not be determined")
+
         result = UploadResult(
             success=False,
             tileset_id=f"{self.username}.{config.tileset_id}",
@@ -189,19 +281,44 @@ class TilesetUploader:
         )
 
         try:
+            self._emit_progress(
+                progress_callback,
+                stage="starting",
+                message="Starting upload pipeline",
+                percent=5,
+            )
+
             # Get converter for the file format
             converter = get_converter(format_name=format_hint, file_path=file_path)
+            self._emit_progress(
+                progress_callback,
+                stage="converting",
+                message=f"Converting from {converter.format_name}",
+                percent=15,
+            )
 
             # Convert to GeoJSON
             conversion = converter.convert(file_path)
             result.conversion_result = conversion
             result.warnings.extend(conversion.warnings)
             result.steps["convert"] = True
+            self._emit_progress(
+                progress_callback,
+                stage="converted",
+                message=f"Converted {conversion.feature_count} features",
+                percent=30,
+            )
 
             geojson = conversion.geojson
 
             # Validate geometry
             if self._validator:
+                self._emit_progress(
+                    progress_callback,
+                    stage="validating",
+                    message="Validating geometry",
+                    percent=40,
+                )
                 validation = self._validator.validate(geojson)
                 result.validation_result = validation
                 result.steps["validate"] = True
@@ -211,8 +328,24 @@ class TilesetUploader:
                     if warning.severity in ("warning", "error"):
                         result.warnings.append(f"[{warning.warning_type}] {warning.message}")
 
+                self._emit_progress(
+                    progress_callback,
+                    stage="validated",
+                    message=(
+                        f"Validation complete ({validation.valid_feature_count}/"
+                        f"{validation.feature_count} valid)"
+                    ),
+                    percent=50,
+                )
+
             if dry_run:
                 result.success = True
+                self._emit_progress(
+                    progress_callback,
+                    stage="dry_run_complete",
+                    message="Dry run complete",
+                    percent=100,
+                )
                 return result
 
             # Write GeoJSON to temp file for upload
@@ -227,31 +360,71 @@ class TilesetUploader:
 
             try:
                 # Upload source
+                self._emit_progress(
+                    progress_callback,
+                    stage="uploading_source",
+                    message="Uploading source to Mapbox",
+                    percent=60,
+                )
                 self._upload_source(geojson_path, config.source_id)
                 result.steps["upload_source"] = True
 
                 # Create or update tileset
                 full_tileset_id = f"{self.username}.{config.tileset_id}"
                 recipe = self._build_recipe(config)
+                self._emit_progress(
+                    progress_callback,
+                    stage="configuring_tileset",
+                    message="Configuring tileset recipe",
+                    percent=70,
+                )
 
                 if self._tileset_exists(full_tileset_id):
                     self._update_recipe(full_tileset_id, recipe)
                     result.steps["update_recipe"] = True
+                    self._emit_progress(
+                        progress_callback,
+                        stage="recipe_updated",
+                        message="Existing tileset recipe updated",
+                        percent=78,
+                    )
                 else:
                     self._create_tileset(full_tileset_id, recipe, config)
                     result.steps["create_tileset"] = True
+                    self._emit_progress(
+                        progress_callback,
+                        stage="tileset_created",
+                        message="Tileset created",
+                        percent=78,
+                    )
 
                 # Publish tileset
+                self._emit_progress(
+                    progress_callback,
+                    stage="publishing",
+                    message="Publishing tileset job",
+                    percent=85,
+                )
                 job_id = self._publish_tileset(full_tileset_id)
                 result.steps["publish"] = True
                 result.job_id = job_id
 
                 # Wait for completion
-                status = self._wait_for_job(full_tileset_id, job_id)
+                status = self._wait_for_job(
+                    full_tileset_id,
+                    job_id,
+                    progress_callback=progress_callback,
+                )
                 result.steps["job_complete"] = True
                 result.job_status = status
 
                 result.success = status == "success"
+                self._emit_progress(
+                    progress_callback,
+                    stage="complete" if result.success else "failed",
+                    message="Upload complete" if result.success else f"Upload failed: {status}",
+                    percent=100,
+                )
 
             finally:
                 geojson_path.unlink(missing_ok=True)
@@ -260,6 +433,44 @@ class TilesetUploader:
             result.error = str(e)
 
         return result
+
+    @staticmethod
+    def _emit_progress(
+        callback: Callable[[dict[str, Any]], None] | None,
+        stage: str,
+        message: str,
+        percent: int,
+        **extra: Any,
+    ) -> None:
+        if callback is None:
+            return
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "message": message,
+            "percent": percent,
+        }
+        payload.update(extra)
+        callback(payload)
+
+    def _ensure_config_ids(self, config: TilesetConfig) -> None:
+        """Ensure tileset and source identifiers are populated."""
+        if not config.tileset_id:
+            config.tileset_id = self._generate_tileset_id(config.tileset_name)
+
+        if not config.source_id:
+            config.source_id = config.tileset_id.replace(".", "-")
+
+    @staticmethod
+    def _generate_tileset_id(tileset_name: str) -> str:
+        """Generate a safe tileset ID from tileset name and timestamp."""
+        base = (tileset_name or "tileset").strip().lower()
+        base = re.sub(r"[^a-z0-9_-]+", "-", base)
+        base = re.sub(r"-+", "-", base).strip("-")
+        if not base:
+            base = "tileset"
+
+        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        return f"{base[:20]}-{timestamp}"
 
     def _download_file(self, url: str, dest_path: Path) -> None:
         """Download a file from URL."""
@@ -276,16 +487,52 @@ class TilesetUploader:
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         """Run a tilesets CLI command."""
-        cmd = ["tilesets"] + args
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        if self._tilesets_command:
+            cmd = self._tilesets_command + args
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        elif self._use_inprocess_tilesets:
+            result = self._run_tilesets_inprocess(args)
+        else:
+            raise RuntimeError("tilesets CLI command is not configured")
+
         if check and result.returncode != 0:
             raise RuntimeError(f"Tilesets command failed: {result.stderr}")
         return result
+
+    def _run_tilesets_inprocess(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        """Run mapbox-tilesets via Click in-process."""
+        from mapbox_tilesets.scripts.cli import cli as tilesets_cli
+
+        runner = CliRunner()
+        env = {"MAPBOX_ACCESS_TOKEN": self.access_token or ""}
+
+        try:
+            result = runner.invoke(
+                tilesets_cli,
+                args,
+                env=env,
+                catch_exceptions=False,
+            )
+            stdout = getattr(result, "stdout", "") or result.output
+            stderr = getattr(result, "stderr", "")
+            return subprocess.CompletedProcess(
+                args=["tilesets"] + args,
+                returncode=result.exit_code,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        except Exception as exc:
+            return subprocess.CompletedProcess(
+                args=["tilesets"] + args,
+                returncode=1,
+                stdout="",
+                stderr=str(exc),
+            )
 
     def _upload_source(self, file_path: Path, source_id: str | None) -> None:
         """Upload file to tileset source."""
@@ -375,6 +622,7 @@ class TilesetUploader:
         job_id: str,
         timeout: int = 600,
         poll_interval: int = 10,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         """Wait for tileset job to complete."""
         start_time = time.time()
@@ -382,10 +630,29 @@ class TilesetUploader:
         while time.time() - start_time < timeout:
             result = self._run_tilesets_command(["status", tileset_id], check=False)
 
+            elapsed = int(time.time() - start_time)
+            self._emit_progress(
+                progress_callback,
+                stage="publishing_wait",
+                message=f"Waiting for Mapbox publish job ({elapsed}s elapsed)",
+                percent=90,
+                elapsed_seconds=elapsed,
+                job_id=job_id,
+            )
+
             if result.returncode == 0:
                 try:
                     status_data = json.loads(result.stdout)
                     status = status_data.get("status", "unknown")
+
+                    self._emit_progress(
+                        progress_callback,
+                        stage="job_status",
+                        message=f"Mapbox job status: {status}",
+                        percent=95,
+                        job_id=job_id,
+                        mapbox_status=status,
+                    )
 
                     if status == "success":
                         return "success"

@@ -73,9 +73,10 @@ class BaseConverter(ABC):
                 missing.append(package)
 
         if missing:
+            extra_name = self.format_name.lower().replace(" ", "-")
             raise ImportError(
                 f"Missing required packages for {self.format_name}: {', '.join(missing)}. "
-                f"Install with: pip install mapbox-tileset-uploader[{self.format_name.lower()}]"
+                f"Install with: pip install mtu[{extra_name}]"
             )
 
     @classmethod

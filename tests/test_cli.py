@@ -16,6 +16,7 @@ class TestCLI:
         assert "Mapbox Tileset Uploader" in result.output
         assert "upload" in result.output
         assert "convert" in result.output
+        assert "ui" in result.output
 
     def test_version(self) -> None:
         """Test version command."""
@@ -41,6 +42,7 @@ class TestCLI:
         assert "CONFIGURATION" in result.output
         assert "MAPBOX_ACCESS_TOKEN" in result.output
         assert "SUPPORTED FORMATS" in result.output
+        assert "mtu ui" in result.output
 
     def test_upload_help(self) -> None:
         """Test upload command help."""

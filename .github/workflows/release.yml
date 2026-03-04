@@ -25,7 +25,7 @@ on:
 
 jobs:
   version-bump:
-    name: Bump version and create release
+    name: Bump version
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -126,16 +126,6 @@ jobs:
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git push
 
-      - name: Create GitHub Release
-        if: ${{ inputs.dry_run != true }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.bump.outputs.new_version }}
-          name: v${{ steps.bump.outputs.new_version }}
-          body: ${{ steps.changelog.outputs.changelog }}
-          prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: false
-
       - name: Dry run summary
         if: ${{ inputs.dry_run == true }}
         run: |
@@ -148,8 +138,8 @@ jobs:
           echo "### Changelog Preview" >> $GITHUB_STEP_SUMMARY
           cat changelog.md >> $GITHUB_STEP_SUMMARY
 
-  build:
-    name: Build distribution
+  build-python-dist:
+    name: Build Python distribution
     needs: version-bump
     if: ${{ inputs.dry_run != true }}
     runs-on: ubuntu-latest
@@ -186,12 +176,52 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
+
+  build-windows-portable:
+    name: Build Windows portable ZIP
+    needs: version-bump
+    if: ${{ inputs.dry_run != true }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          $py = (Get-Command python).Path
+          ./scripts/build_windows_exe.ps1 -PythonPath $py
+
+      - name: Create portable zip
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/mtu-desktop")) {
+            throw "Expected dist/mtu-desktop output was not found"
+          }
+          $version = "${{ needs.version-bump.outputs.new_version }}"
+          $zipName = "ROSEA-MTU-v$version-portable.zip"
+          Compress-Archive -Path "dist/mtu-desktop/*" -DestinationPath ("dist/" + $zipName) -Force
+          echo "zip_name=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-portable.zip
 
   test-install:
     name: Test installation
-    needs: build
+    needs: build-python-dist
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -205,7 +235,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
 
       - name: Install from wheel
@@ -214,9 +244,42 @@ jobs:
           mtu --version
           mtu formats
 
+  create-release:
+    name: Create GitHub Release with assets
+    needs: [version-bump, build-python-dist, build-windows-portable]
+    if: ${{ inputs.dry_run != true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Python artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Download Windows portable ZIP
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version-bump.outputs.new_version }}
+          name: v${{ needs.version-bump.outputs.new_version }}
+          body: ${{ needs.version-bump.outputs.changelog }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: false
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-portable.zip
+
   publish-pypi:
     name: Publish to PyPI
-    needs: [version-bump, test-install]
+    needs: [version-bump, test-install, create-release]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -227,7 +290,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: python-dist
           path: dist/
 
       - name: Publish to PyPI

@@ -562,6 +562,7 @@ def info() -> None:
 
 📚 COMMANDS
    mtu upload      Upload GIS file to Mapbox
+    mtu ui          Launch desktop uploader UI
    mtu convert     Convert GIS file to GeoJSON
    mtu validate    Validate a GIS file
    mtu formats     List supported formats
@@ -572,6 +573,17 @@ def info() -> None:
    Documentation: https://github.com/im4sea/mapbox-tileset-uploader
    Mapbox Studio: https://studio.mapbox.com/tilesets/
 """)
+
+
+@main.command()
+def ui() -> None:
+    """Launch desktop UI for uploading GIS files to Mapbox."""
+    try:
+        from mtu.ui import launch_ui
+    except Exception as e:
+        raise click.ClickException(f"Desktop UI is not available in this environment: {e}")
+
+    launch_ui()
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ A CLI tool and Python library to upload GIS data to Mapbox as vector tilesets. S
 - 🔄 Automatic format detection and conversion to GeoJSON
 - ⚙️ Configurable zoom levels, layer names, and recipes
 - 🔧 Both CLI and Python API available
+- 🖥️ Desktop UI for local GIS file uploads (GeoJSON, zipped Shapefile, and more)
 - 📦 Modular architecture with optional dependencies
 - 🧩 Extensible converter system
 
@@ -176,6 +177,30 @@ mtu upload \
   --id my-tileset \
   --name "My Tileset"
 ```
+
+### Desktop UI (Windows/macOS/Linux)
+
+Launch the desktop uploader interface:
+
+```bash
+mtu ui
+```
+
+Or use the dedicated script:
+
+```bash
+mtu-ui
+```
+
+The desktop app provides:
+
+- Intro/welcome page (first screen) with workflow, zoom defaults, and Mapbox cost/limit notes
+- GIS file picker (including `.geojson` and zipped shapefile `.zip`)
+- Mapbox credentials config panel (saved to `~/.mtu/desktop_config.json`)
+- Tileset controls for final tileset name, zoom range, description, and attribution
+- Mapbox capacity guard (user-configured MB capacity/usage) to block uploads when projected usage exceeds limit
+- Optional description, attribution, validation toggle, and dry-run mode
+- Auto-generated tileset ID (reported in the status log), warnings, and Mapbox Studio link on success
 
 ### Upload with Custom Options
 
@@ -453,6 +478,82 @@ jobs:
 ```
 
 ## Development
+
+### Build Windows Executable (Self-Contained)
+
+You can package the desktop UI as a self-contained Windows executable using PyInstaller.
+
+Use a non-conda CPython interpreter (python.org build). Conda-based interpreters can produce
+`_tkinter` DLL load failures in packaged apps.
+
+Suggested setup:
+
+```powershell
+winget install -e --id Python.Python.3.11
+py -3.11 -m venv C:\Users\<you>\mtu-winbuild
+C:\Users\<you>\mtu-winbuild\Scripts\python.exe -m pip install --upgrade pip
+```
+
+From the project root:
+
+```powershell
+./scripts/build_windows_exe.ps1 -PythonPath C:\Users\<you>\mtu-winbuild\Scripts\python.exe
+```
+
+This creates a self-contained app in `dist/mtu-desktop/` (recommended, onedir mode).
+
+To create a portable ZIP (shareable folder build):
+
+```powershell
+Compress-Archive -Path .\dist\mtu-desktop\* -DestinationPath .\dist\mtu-desktop-portable.zip -Force
+```
+
+Run it by extracting the ZIP, then launching:
+
+```powershell
+./mtu-desktop.exe
+```
+
+If you build with an alternate output name (for example `mtu-desktop-si`), use the matching folder/exe name.
+
+For a single-file executable:
+
+```powershell
+./scripts/build_windows_exe.ps1 -PythonPath C:\Users\<you>\mtu-winbuild\Scripts\python.exe -OneFile
+```
+
+Notes:
+
+- The generated executable includes Python runtime and dependencies.
+- If your system `tilesets.exe` launcher is broken, MTU automatically falls back to the in-process `mapbox-tilesets` module.
+- For best reliability and startup speed, prefer onedir mode.
+
+### GitHub Release Automation (Semantic + Portable ZIP)
+
+This repository includes a manual release workflow with semantic version bumping.
+
+In GitHub Actions, run the `Release` workflow manually and choose:
+
+- `bump_type`: `patch`, `minor`, or `major`
+- `prerelease`: `true/false`
+- `dry_run`: `true/false`
+
+When `dry_run` is `false`, the workflow will:
+
+1. Bump version in `pyproject.toml` and push commit
+2. Build Python distributions (`.whl`, `.tar.gz`)
+3. Build Windows desktop app and package `ROSEA-MTU-portable.zip`
+4. Create a GitHub Release and attach all artifacts
+5. Publish the Python package to PyPI (if PyPI environment is configured)
+
+Release assets include:
+
+- Wheel: `*.whl`
+- Source dist: `*.tar.gz`
+- Portable desktop app: `ROSEA-MTU-portable.zip`
+
+The portable ZIP is versioned on releases as:
+`ROSEA-MTU-v<version>-portable.zip`
 
 ### Setup
 
