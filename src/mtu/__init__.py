@@ -12,6 +12,8 @@ Supports multiple formats:
 - GPX (.gpx)
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from mtu.converters import (
     BaseConverter,
     ConversionResult,
@@ -30,7 +32,10 @@ from mtu.validators import (
     validate_geojson,
 )
 
-__version__ = "0.2.0"
+try:
+    __version__ = version("mtu")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 __all__ = [
     # Core
     "TilesetUploader",
