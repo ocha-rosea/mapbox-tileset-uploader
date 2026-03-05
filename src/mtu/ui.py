@@ -1134,8 +1134,12 @@ class MTUDesktopApp:
         if os.name != "nt":
             return {}
 
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo_factory = getattr(subprocess, "STARTUPINFO", None)
+        if startupinfo_factory is None:
+            return {}
+
+        startupinfo = startupinfo_factory()
+        startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
         startupinfo.wShowWindow = 0
         return {
             "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
