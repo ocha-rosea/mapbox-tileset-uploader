@@ -257,6 +257,39 @@ class TestTilesetUploader:
         assert result.returncode == 0
         assert result.stdout == "ok"
 
+    def test_run_tilesets_command_falls_back_to_inprocess_on_cli_exit_attribute_error(self) -> None:
+        """Test fallback to in-process execution when external CLI has click.exit issue."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader.username = "demo-user"
+        uploader._tilesets_command = ["tilesets"]
+        uploader._use_inprocess_tilesets = False
+
+        failing_cli_result = subprocess.CompletedProcess(
+            args=["tilesets", "list-sources", "demo-user"],
+            returncode=1,
+            stdout="",
+            stderr="AttributeError: exit. Did you mean: 'edit'?",
+        )
+        inprocess_success = subprocess.CompletedProcess(
+            args=["tilesets", "list-sources", "demo-user"],
+            returncode=0,
+            stdout="[]",
+            stderr="",
+        )
+
+        with patch("subprocess.run", return_value=failing_cli_result):
+            with patch.object(TilesetUploader, "can_use_inprocess_tilesets", return_value=True):
+                with patch.object(
+                    uploader,
+                    "_run_tilesets_inprocess",
+                    return_value=inprocess_success,
+                ):
+                    result = uploader._run_tilesets_command(["list-sources", "demo-user"])
+
+        assert result.returncode == 0
+        assert uploader._tilesets_command is None
+        assert uploader._use_inprocess_tilesets
+
     def test_validate_source_file_size_allows_limit(self) -> None:
         """Test that files at limit are accepted."""
         uploader = TilesetUploader.__new__(TilesetUploader)

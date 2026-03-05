@@ -318,6 +318,32 @@ jobs:
           $py = (Get-Command python).Path
           ./scripts/build_windows_exe.ps1 -PythonPath $py
 
+      - name: Sign Windows executable (optional)
+        if: ${{ secrets.WINDOWS_CERT_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes(
+            $certPath,
+            [Convert]::FromBase64String("${{ secrets.WINDOWS_CERT_BASE64 }}")
+          )
+
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $signtool) {
+            throw "signtool.exe not found on runner"
+          }
+
+          & $signtool.FullName sign \
+            /fd SHA256 \
+            /f $certPath \
+            /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" \
+            /tr http://timestamp.digicert.com \
+            /td SHA256 \
+            "dist/mtu-desktop/mtu-desktop.exe"
+
       - name: Create portable zip
         shell: pwsh
         run: |

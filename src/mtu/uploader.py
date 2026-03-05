@@ -576,6 +576,26 @@ class TilesetUploader:
 
         if check and result.returncode != 0:
             detail = self._format_tilesets_command_error(result)
+            lowered = detail.lower()
+
+            if (
+                self._tilesets_command
+                and "attributeerror" in lowered
+                and "exit" in lowered
+                and self.can_use_inprocess_tilesets()
+            ):
+                self._tilesets_command = None
+                self._use_inprocess_tilesets = True
+                retry_result = self._run_tilesets_inprocess(args)
+                if retry_result.returncode == 0:
+                    return retry_result
+
+                retry_detail = self._format_tilesets_command_error(retry_result)
+                raise RuntimeError(
+                    "Tilesets command failed via CLI and in-process fallback: "
+                    f"CLI error: {detail}; in-process error: {retry_detail}"
+                )
+
             raise RuntimeError(f"Tilesets command failed: {detail}")
         return result
 
