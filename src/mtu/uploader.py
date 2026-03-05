@@ -12,7 +12,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -495,7 +495,7 @@ class TilesetUploader:
         if not base:
             base = "tileset"
 
-        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         return f"{base[:20]}-{timestamp}"
 
     def _download_file(self, url: str, dest_path: Path) -> None:
