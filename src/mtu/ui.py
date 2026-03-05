@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 try:
     from tkintermapview import TkinterMapView
@@ -31,7 +32,7 @@ from mtu.uploader import (
 )
 
 _SINGLE_INSTANCE_LOCK_FILE: object | None = None
-DEFAULT_MIN_ZOOM = 6
+DEFAULT_MIN_ZOOM = 0
 DEFAULT_MAX_ZOOM = 10
 
 
@@ -157,7 +158,7 @@ class MTUDesktopApp:
         self.dry_run_var = tk.BooleanVar(value=False)
         self.preflight_started = False
         self.zoom_preview_map: TkinterMapView | None = None
-        self.zoom_preview_mode = "max"
+        self.zoom_preview_mode = "min"
         self.zoom_preview_text_var = tk.StringVar(value="")
         self.zoom_current_level_var = tk.StringVar(value="Current map zoom: n/a")
         self.tileset_availability_var = tk.StringVar(value="")
@@ -1090,6 +1091,8 @@ class MTUDesktopApp:
             self.upload_button.configure(state=tk.NORMAL)
             return True
 
+        assert command is not None
+
         try:
             result = subprocess.run(
                 command + ["--help"],
@@ -1422,12 +1425,14 @@ def launch_ui() -> None:
     if os.name == "nt":
         import msvcrt
 
+        msvcrt_module: Any = msvcrt
+
         lock_path = Path(tempfile.gettempdir()) / "rosea_mtu_single_instance.lock"
         lock_file = open(lock_path, "a+b")
 
         try:
             lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
         except OSError:
             lock_file.close()
             return
