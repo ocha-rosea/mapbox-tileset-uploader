@@ -36,6 +36,32 @@ DEFAULT_MIN_ZOOM = 0
 DEFAULT_MAX_ZOOM = 10
 
 
+def _release_single_instance_lock() -> None:
+    global _SINGLE_INSTANCE_LOCK_FILE
+
+    lock_file = _SINGLE_INSTANCE_LOCK_FILE
+    if lock_file is None:
+        return
+
+    lock_file_obj: Any = lock_file
+
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt_module: Any = msvcrt
+            lock_file_obj.seek(0)
+            msvcrt_module.locking(lock_file_obj.fileno(), msvcrt_module.LK_UNLCK, 1)
+    except OSError:
+        pass
+    finally:
+        try:
+            lock_file_obj.close()
+        except OSError:
+            pass
+        _SINGLE_INSTANCE_LOCK_FILE = None
+
+
 @dataclass
 class UIConfig:
     """Persisted settings for the desktop UI."""
@@ -130,6 +156,9 @@ class MTUDesktopApp:
 
         self.status_queue: Queue[tuple[str, str]] = Queue()
         self.upload_thread: threading.Thread | None = None
+        self._is_closing = False
+        self._status_poll_after_id: str | None = None
+        self._zoom_poll_after_id: str | None = None
 
         self.config_path = get_config_path()
         self.saved = load_ui_config(self.config_path)
@@ -171,7 +200,8 @@ class MTUDesktopApp:
         self.max_zoom_var.trace_add("write", self._on_zoom_limits_changed)
         self._refresh_generated_ids()
         self.preflight_ok = False
-        self.root.after(200, self._poll_status_queue)
+        self._status_poll_after_id = self.root.after(200, self._poll_status_queue)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _setup_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -898,6 +928,9 @@ class MTUDesktopApp:
         )
 
     def _poll_map_zoom_level(self) -> None:
+        if self._is_closing:
+            return
+
         if self.zoom_preview_map is not None:
             try:
                 current_zoom = float(getattr(self.zoom_preview_map, "zoom"))
@@ -909,7 +942,7 @@ class MTUDesktopApp:
                 except Exception:
                     pass
 
-        self.root.after(500, self._poll_map_zoom_level)
+            self._zoom_poll_after_id = self.root.after(500, self._poll_map_zoom_level)
 
     def _select_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -1417,6 +1450,9 @@ class MTUDesktopApp:
             self.status_queue.put(("error", f"Upload failed: {detail}"))
 
     def _poll_status_queue(self) -> None:
+        if self._is_closing:
+            return
+
         while True:
             try:
                 level, message = self.status_queue.get_nowait()
@@ -1431,7 +1467,35 @@ class MTUDesktopApp:
             elif level == "done":
                 self.upload_button.configure(state=tk.NORMAL)
 
-        self.root.after(200, self._poll_status_queue)
+        self._status_poll_after_id = self.root.after(200, self._poll_status_queue)
+
+    def _on_close(self) -> None:
+        if self._is_closing:
+            return
+
+        if self.upload_thread and self.upload_thread.is_alive():
+            should_close = messagebox.askyesno(
+                "Upload In Progress",
+                "An upload is still running. Close the app anyway?",
+            )
+            if not should_close:
+                return
+
+        self._is_closing = True
+
+        try:
+            self._save_current_config()
+        except Exception:
+            pass
+
+        for after_id in (self._status_poll_after_id, self._zoom_poll_after_id):
+            if after_id:
+                try:
+                    self.root.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+
+        self.root.destroy()
 
 
 def launch_ui() -> None:
@@ -1457,4 +1521,7 @@ def launch_ui() -> None:
 
     root = tk.Tk()
     MTUDesktopApp(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        _release_single_instance_lock()
