@@ -485,24 +485,83 @@ class TilesetUploader:
         self,
         args: list[str],
         check: bool = True,
+        timeout: int = 300,
     ) -> subprocess.CompletedProcess[str]:
         """Run a tilesets CLI command."""
         if self._tilesets_command:
             cmd = self._tilesets_command + args
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                cmd_preview = " ".join(cmd)
+                raise RuntimeError(
+                    f"Tilesets command timed out after {timeout}s: {cmd_preview}"
+                ) from exc
         elif self._use_inprocess_tilesets:
             result = self._run_tilesets_inprocess(args)
         else:
             raise RuntimeError("tilesets CLI command is not configured")
 
         if check and result.returncode != 0:
-            raise RuntimeError(f"Tilesets command failed: {result.stderr}")
+            detail = self._format_tilesets_command_error(result)
+            raise RuntimeError(f"Tilesets command failed: {detail}")
         return result
+
+    @staticmethod
+    def _extract_error_message(raw_text: str) -> str:
+        """Extract the most useful error message from tilesets CLI output."""
+        text = (raw_text or "").strip()
+        if not text:
+            return ""
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return text
+
+        for line in reversed(lines):
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if isinstance(payload, dict):
+                for key in ("message", "error", "detail"):
+                    value = payload.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+
+            if isinstance(payload, str) and payload.strip():
+                return payload.strip()
+
+        return lines[-1]
+
+    def _format_tilesets_command_error(self, result: subprocess.CompletedProcess[str]) -> str:
+        """Build a readable tilesets CLI failure message with likely remediation."""
+        stderr_message = self._extract_error_message(result.stderr or "")
+        stdout_message = self._extract_error_message(result.stdout or "")
+
+        message = stderr_message or stdout_message or f"Command exited with code {result.returncode}"
+        lowered = message.lower()
+
+        if "forbidden" in lowered:
+            return (
+                f"{message}. Check MAPBOX_ACCESS_TOKEN, verify it can manage tilesets, "
+                f"and confirm MAPBOX_USERNAME ('{self.username}') matches the token owner."
+            )
+
+        if "unauthorized" in lowered:
+            return (
+                f"{message}. Your MAPBOX_ACCESS_TOKEN appears invalid or expired; generate a new token "
+                "and retry."
+            )
+
+        return message
 
     def _run_tilesets_inprocess(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         """Run mapbox-tilesets via Click in-process."""

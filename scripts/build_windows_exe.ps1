@@ -44,6 +44,8 @@ $distMode = if ($OneFile) { "--onefile" } else { "--onedir" }
     --name mtu-desktop `
     --paths src `
     --hidden-import mapbox_tilesets.scripts.cli `
+    --hidden-import tkintermapview `
+    --collect-all tkintermapview `
     src/mtu/ui_main.py
 
 Write-Host "Build complete. Output is in .\dist\mtu-desktop\ (or .\dist\mtu-desktop.exe for onefile)."

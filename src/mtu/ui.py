@@ -14,11 +14,18 @@ from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 
+try:
+    from tkintermapview import TkinterMapView
+except Exception:
+    TkinterMapView = None
+
 from mtu.converters import get_supported_formats
 from mtu.uploader import TilesetConfig, TilesetUploader, UploadResult
 
 
 _SINGLE_INSTANCE_LOCK_FILE: object | None = None
+DEFAULT_MIN_ZOOM = 6
+DEFAULT_MAX_ZOOM = 10
 
 
 @dataclass
@@ -32,8 +39,8 @@ class UIConfig:
     tileset_id: str = ""
     source_id: str = ""
     tileset_name: str = ""
-    min_zoom: int = 0
-    max_zoom: int = 10
+    min_zoom: int = DEFAULT_MIN_ZOOM
+    max_zoom: int = DEFAULT_MAX_ZOOM
     description: str = ""
     attribution: str = ""
     format_hint: str = ""
@@ -97,9 +104,17 @@ class MTUDesktopApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("OCHA ROSEA Mapbox Tileset Uploader")
-        self.root.geometry("980x760")
         self.root.minsize(920, 700)
         self.root.configure(bg="white")
+
+        self.root.update_idletasks()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        window_width = int(screen_width * 0.66)
+        window_height = int(screen_height * 0.9)
+        pos_x = max((screen_width - window_width) // 2, 0)
+        pos_y = max((screen_height - window_height) // 2, 0)
+        self.root.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
 
         self._setup_styles()
 
@@ -129,9 +144,18 @@ class MTUDesktopApp:
         self.validate_var = tk.BooleanVar(value=True)
         self.dry_run_var = tk.BooleanVar(value=False)
         self.preflight_started = False
+        self.zoom_preview_map: TkinterMapView | None = None
+        self.zoom_preview_mode = "max"
+        self.zoom_preview_text_var = tk.StringVar(value="")
+        self.zoom_current_level_var = tk.StringVar(value="Current map zoom: n/a")
+        self.tileset_availability_var = tk.StringVar(value="")
+        self.map_center_lat_var = tk.StringVar(value="-0.0236")
+        self.map_center_lon_var = tk.StringVar(value="37.9062")
 
         self.format_lookup = self._load_format_lookup()
         self._build_layout()
+        self.min_zoom_var.trace_add("write", self._on_zoom_limits_changed)
+        self.max_zoom_var.trace_add("write", self._on_zoom_limits_changed)
         self._refresh_generated_ids()
         self.preflight_ok = False
         self.root.after(200, self._poll_status_queue)
@@ -230,9 +254,21 @@ class MTUDesktopApp:
             header,
             text="OCHA ROSEA Mapbox Tileset Uploader",
             bg=self.PRIMARY_COLOR,
-            fg=self.ACCENT_COLOR,
+            fg="white",
             font=("Segoe UI", 10, "bold"),
         ).pack(side=tk.LEFT, padx=(14, 0))
+        tk.Button(
+            header,
+            text="Back",
+            bg=self.ACCENT_COLOR,
+            fg="white",
+            activebackground="white",
+            activeforeground=self.PRIMARY_COLOR,
+            relief=tk.FLAT,
+            padx=10,
+            pady=4,
+            command=self._go_to_welcome_page,
+        ).pack(side=tk.RIGHT)
 
         form_grid = ttk.Frame(container, style="App.TFrame")
         form_grid.pack(fill=tk.X)
@@ -330,11 +366,21 @@ class MTUDesktopApp:
         ).grid(
             row=4, column=1, sticky=tk.E, pady=(10, 0)
         )
+        ttk.Label(
+            creds_frame,
+            text=(
+                "Required Mapbox token scopes: "
+                "tilesets:read, tilesets:write, tilesets:list"
+            ),
+            style="App.TLabel",
+            wraplength=500,
+            justify=tk.LEFT,
+        ).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
         creds_frame.columnconfigure(1, weight=1)
         self._on_credentials_mode_changed()
 
         settings_frame = ttk.LabelFrame(
-            right_col, text="Tileset Settings", padding=10, style="App.TLabelframe"
+            left_col, text="Tileset Settings", padding=10, style="App.TLabelframe"
         )
         settings_frame.pack(fill=tk.X, pady=(10, 0))
         settings_frame.columnconfigure(1, weight=1)
@@ -392,42 +438,53 @@ class MTUDesktopApp:
             width=8,
         ).grid(row=3, column=3, sticky=tk.W, padx=(8, 0), pady=(8, 0))
 
+        ttk.Label(
+            settings_frame,
+            textvariable=self.tileset_availability_var,
+            style="App.TLabel",
+            wraplength=420,
+            justify=tk.LEFT,
+        ).grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(8, 0))
+
         ttk.Label(settings_frame, text="Description", style="App.TLabel").grid(
-            row=4, column=0, sticky=tk.W, pady=(8, 0)
+            row=5, column=0, sticky=tk.W, pady=(8, 0)
         )
         ttk.Entry(settings_frame, textvariable=self.description_var).grid(
-            row=4, column=1, columnspan=3, sticky=tk.EW, padx=(8, 0), pady=(8, 0)
+            row=5, column=1, columnspan=3, sticky=tk.EW, padx=(8, 0), pady=(8, 0)
         )
 
         ttk.Label(settings_frame, text="Attribution", style="App.TLabel").grid(
-            row=5, column=0, sticky=tk.W, pady=(8, 0)
+            row=6, column=0, sticky=tk.W, pady=(8, 0)
         )
         ttk.Entry(settings_frame, textvariable=self.attribution_var).grid(
-            row=5, column=1, columnspan=3, sticky=tk.EW, padx=(8, 0), pady=(8, 0)
+            row=6, column=1, columnspan=3, sticky=tk.EW, padx=(8, 0), pady=(8, 0)
         )
 
         ttk.Checkbutton(
             settings_frame,
             text="Validate geometry before upload",
             variable=self.validate_var,
-        ).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ).grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
         ttk.Checkbutton(
             settings_frame,
             text="Dry run (validate only)",
             variable=self.dry_run_var,
-        ).grid(row=6, column=2, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ).grid(row=7, column=2, columnspan=2, sticky=tk.W, pady=(10, 0))
 
         limits_frame = ttk.LabelFrame(
-            left_col, text="Mapbox Limits & Capacity", padding=10, style="App.TLabelframe"
+            right_col, text="Mapbox Limits & Capacity", padding=10, style="App.TLabelframe"
         )
         limits_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Label(
             limits_frame,
             text=(
-                "Mapbox zoom range is typically 0-22. This app defaults to min 0 and max 10. "
-                "Capacity and costs vary by plan; exceeding plan usage may incur additional charges."
+                "Mapbox zoom range is typically 0-22. This app defaults to min 6 and max 12. "
+                "Mapbox zoom range is typically 0-22. This app defaults to min 6 and max 10. "
+                "Tileset generation consumes Mapbox capacity units (CUs). This tool cannot read your "
+                "remaining account CUs before upload. Check your Mapbox account usage/limits first—high "
+                "zoom ranges and heavy datasets can consume billable credits when CU limits are exceeded."
             ),
             style="App.TLabel",
             wraplength=420,
@@ -454,14 +511,100 @@ class MTUDesktopApp:
             row=2, column=3, sticky=tk.W, padx=(8, 0), pady=(8, 0)
         )
 
+        ttk.Label(
+            limits_frame,
+            text="OpenStreetMap zoom preview",
+            style="App.TLabel",
+        ).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
+
+        map_preview_host = tk.Frame(limits_frame, bg="white", bd=1, relief=tk.SOLID)
+        map_preview_host.grid(row=4, column=0, columnspan=4, sticky=tk.EW, pady=(6, 0))
+        map_preview_host.columnconfigure(0, weight=1)
+
+        if TkinterMapView is None:
+            ttk.Label(
+                map_preview_host,
+                text="Install tkintermapview to enable OSM zoom preview.",
+                style="App.TLabel",
+            ).grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+        else:
+            self.zoom_preview_map = TkinterMapView(map_preview_host, width=420, height=220)
+            self.zoom_preview_map.grid(row=0, column=0, columnspan=4, sticky=tk.EW, padx=2, pady=2)
+            self.zoom_preview_map.set_tile_server(
+                "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                max_zoom=19,
+            )
+            self.zoom_preview_map.set_position(-0.0236, 37.9062)
+            self.zoom_preview_map.canvas.unbind("<MouseWheel>")
+            self.zoom_preview_map.canvas.unbind("<Button-4>")
+            self.zoom_preview_map.canvas.unbind("<Button-5>")
+
+            ttk.Button(
+                map_preview_host,
+                text="Preview Min Zoom",
+                command=self._preview_min_zoom,
+                style="Accent.TButton",
+            ).grid(row=1, column=0, sticky=tk.W, padx=(8, 6), pady=(6, 6))
+
+            ttk.Button(
+                map_preview_host,
+                text="Preview Max Zoom",
+                command=self._preview_max_zoom,
+                style="Primary.TButton",
+            ).grid(row=1, column=1, sticky=tk.W, padx=(0, 8), pady=(6, 6))
+
+            ttk.Label(map_preview_host, text="Lat", style="App.TLabel").grid(
+                row=1, column=2, sticky=tk.E, padx=(8, 4), pady=(6, 6)
+            )
+            ttk.Entry(map_preview_host, textvariable=self.map_center_lat_var, width=9).grid(
+                row=1, column=3, sticky=tk.W, padx=(0, 8), pady=(6, 6)
+            )
+
+            ttk.Label(map_preview_host, text="Lon", style="App.TLabel").grid(
+                row=2, column=2, sticky=tk.E, padx=(8, 4), pady=(0, 6)
+            )
+            ttk.Entry(map_preview_host, textvariable=self.map_center_lon_var, width=9).grid(
+                row=2, column=3, sticky=tk.W, padx=(0, 8), pady=(0, 6)
+            )
+
+            ttk.Button(
+                map_preview_host,
+                text="Center Map",
+                command=self._center_preview_map,
+                style="Accent.TButton",
+            ).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(8, 6), pady=(0, 6))
+
+        ttk.Label(
+            limits_frame,
+            textvariable=self.zoom_preview_text_var,
+            style="App.TLabel",
+            wraplength=420,
+            justify=tk.LEFT,
+        ).grid(row=5, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+
+        ttk.Label(
+            limits_frame,
+            text="Tip: use Preview Min/Max or map +/- buttons (scroll-wheel zoom is disabled).",
+            style="App.TLabel",
+            wraplength=420,
+            justify=tk.LEFT,
+        ).grid(row=6, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+
+        ttk.Label(
+            limits_frame,
+            textvariable=self.zoom_current_level_var,
+            style="App.TLabel",
+            justify=tk.LEFT,
+        ).grid(row=7, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+
         ttk.Button(
             limits_frame,
             text="Open Mapbox Pricing",
             command=self._open_pricing_page,
             style="Accent.TButton",
-        ).grid(row=3, column=3, sticky=tk.E, pady=(10, 0))
+        ).grid(row=8, column=3, sticky=tk.E, pady=(10, 0))
 
-        actions = ttk.Frame(right_col)
+        actions = ttk.Frame(container)
         actions.pack(fill=tk.X, pady=(10, 0))
         self.upload_button = ttk.Button(
             actions,
@@ -469,7 +612,7 @@ class MTUDesktopApp:
             command=self._start_upload,
             style="Primary.TButton",
         )
-        self.upload_button.pack(side=tk.RIGHT)
+        self.upload_button.pack(anchor="e", padx=(0, 8))
 
         log_frame = ttk.LabelFrame(container, text="Status", padding=10, style="App.TLabelframe")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -477,63 +620,145 @@ class MTUDesktopApp:
         self.log_text = tk.Text(log_frame, height=12, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
         self.log_text.configure(background="#f8fbfd", foreground="#333333")
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.bind("<Key>", lambda _event: "break")
+        self.log_text.bind("<<Paste>>", lambda _event: "break")
+        self.log_text.bind("<<Cut>>", lambda _event: "break")
+
+        self._update_zoom_preview()
+        self._update_tileset_availability_note()
+        self._poll_map_zoom_level()
 
     def _on_main_mousewheel(self, event: tk.Event) -> None:
         self.main_canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _build_intro_page(self, parent: ttk.Frame) -> None:
-        top_band = tk.Frame(parent, bg=self.PRIMARY_COLOR, padx=14, pady=12)
-        top_band.pack(fill=tk.X)
+        hero = tk.Frame(parent, bg=self.PRIMARY_COLOR, padx=20, pady=18)
+        hero.pack(fill=tk.X)
+
         tk.Label(
-            top_band,
-            text="Welcome to OCHA ROSEA Mapbox Tileset Uploader",
+            hero,
+            text="OCHA ROSEA Mapbox Tileset Uploader",
             bg=self.PRIMARY_COLOR,
             fg="white",
-            font=("Segoe UI", 13, "bold"),
-        ).pack(anchor="w")
-
-        body = tk.Frame(parent, bg="white", padx=16, pady=16)
-        body.pack(fill=tk.BOTH, expand=True)
-
-        info_text = (
-            "This tool converts GIS files (GeoJSON, Shapefile ZIP, and more) and uploads them to "
-            "Mapbox as tilesets.\n\n"
-            "How it works:\n"
-            "1) Choose a GIS file\n"
-            "2) Set Mapbox credentials (or use MAPBOX_ACCESS_TOKEN / MAPBOX_USERNAME)\n"
-            "3) Review tileset settings\n"
-            "4) Upload and monitor live progress\n\n"
-            "Mapbox notes:\n"
-            "- Zoom range is typically 0-22; app defaults to 0-10\n"
-            "- Capacity and cost depend on your Mapbox plan\n"
-            "- Exceeding plan usage may incur additional charges\n\n"
-            "Developed by OCHA ROSEA."
-        )
+            font=("Segoe UI", 15, "bold"),
+        ).pack(anchor="center")
 
         tk.Label(
-            body,
-            text=info_text,
-            justify=tk.LEFT,
-            bg="white",
+            hero,
+            text="Prepare, validate, and upload GIS data to Mapbox tilesets",
+            bg=self.PRIMARY_COLOR,
+            fg="white",
+            font=("Segoe UI", 10),
+        ).pack(anchor="center", pady=(4, 0))
+
+        body = tk.Frame(parent, bg="white", padx=20, pady=18)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        center_wrap = tk.Frame(body, bg="white")
+        center_wrap.pack(expand=True)
+
+        card = tk.Frame(
+            center_wrap,
+            bg="#f8fbfd",
+            highlightbackground="#dbe6ee",
+            highlightthickness=1,
+            padx=18,
+            pady=16,
+        )
+        card.pack(anchor="center")
+
+        tk.Label(
+            card,
+            text="Welcome",
+            bg="#f8fbfd",
+            fg="#333333",
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="center")
+
+        tk.Label(
+            card,
+            text=(
+                "Upload GIS files (GeoJSON, zipped Shapefile, and more) to Mapbox as vector tilesets."
+            ),
+            bg="#f8fbfd",
             fg="#333333",
             font=("Segoe UI", 10),
-        ).pack(anchor="w")
+            justify=tk.CENTER,
+            wraplength=700,
+        ).pack(anchor="center", pady=(6, 10))
 
-        actions = tk.Frame(body, bg="white")
-        actions.pack(fill=tk.X, pady=(18, 0))
+        sections = [
+            (
+                "Workflow",
+                [
+                    "1) Select a GIS file",
+                    "2) Set credentials (or use MAPBOX_ACCESS_TOKEN / MAPBOX_USERNAME)",
+                    "3) Review tileset settings",
+                    "4) Upload and monitor status",
+                ],
+            ),
+            (
+                "Before you start",
+                [
+                    "- Default zoom is 6-10 (Mapbox supports 0-22)",
+                    "- Token scopes: tilesets:read, tilesets:write, tilesets:list",
+                    "- Ensure your input data and naming are final before upload",
+                ],
+            ),
+            (
+                "Capacity and billing notes",
+                [
+                    "- Remaining Mapbox CU cannot be queried directly from this tool",
+                    "- Higher zoom levels and heavy datasets can increase billable usage",
+                    "- Review your Mapbox limits before large uploads",
+                ],
+            ),
+        ]
+
+        for index, (title, lines) in enumerate(sections):
+            section_frame = tk.Frame(card, bg="white", padx=12, pady=10)
+            section_frame.pack(fill=tk.X, pady=(0, 8 if index < len(sections) - 1 else 0))
+
+            tk.Label(
+                section_frame,
+                text=title,
+                bg="white",
+                fg=self.PRIMARY_COLOR,
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            ).pack(fill=tk.X)
+
+            tk.Label(
+                section_frame,
+                text="\n".join(lines),
+                bg="white",
+                fg="#333333",
+                font=("Segoe UI", 10),
+                justify=tk.LEFT,
+                anchor="w",
+                wraplength=700,
+            ).pack(fill=tk.X, pady=(4, 0))
+
+        tk.Label(
+            card,
+            text="Developed by OCHA ROSEA",
+            bg="#f8fbfd",
+            fg="#555555",
+            font=("Segoe UI", 9),
+        ).pack(anchor="center", pady=(12, 10))
+
         tk.Button(
-            actions,
-            text="Start",
+            card,
+            text="Start Upload Setup",
             bg=self.ACCENT_COLOR,
             fg="white",
             activebackground=self.PRIMARY_COLOR,
             activeforeground="white",
             relief=tk.FLAT,
-            padx=16,
-            pady=7,
+            padx=20,
+            pady=8,
             command=self._start_main_page,
-        ).pack(side=tk.RIGHT)
+        ).pack(anchor="center")
 
     def _start_main_page(self) -> None:
         self.intro_page.pack_forget()
@@ -541,6 +766,97 @@ class MTUDesktopApp:
         if not self.preflight_started:
             self.preflight_started = True
             self.preflight_ok = self._run_preflight_checks(show_dialog=True)
+
+    def _go_to_welcome_page(self) -> None:
+        if self.upload_thread and self.upload_thread.is_alive():
+            messagebox.showinfo(
+                "Upload In Progress",
+                "Please wait for the current upload to finish before going back.",
+            )
+            return
+
+        self.main_page.pack_forget()
+        self.intro_page.pack(fill=tk.BOTH, expand=True)
+
+    def _on_zoom_limits_changed(self, *_args: object) -> None:
+        self._update_zoom_preview()
+        self._update_tileset_availability_note()
+
+    def _preview_min_zoom(self) -> None:
+        self.zoom_preview_mode = "min"
+        self._update_zoom_preview()
+
+    def _preview_max_zoom(self) -> None:
+        self.zoom_preview_mode = "max"
+        self._update_zoom_preview()
+
+    def _center_preview_map(self) -> None:
+        if self.zoom_preview_map is None:
+            return
+
+        lat = self._safe_float(self.map_center_lat_var.get(), -0.0236)
+        lon = self._safe_float(self.map_center_lon_var.get(), 37.9062)
+
+        lat = max(-85.0, min(85.0, lat))
+        lon = max(-180.0, min(180.0, lon))
+
+        self.map_center_lat_var.set(f"{lat:.4f}")
+        self.map_center_lon_var.set(f"{lon:.4f}")
+        self.zoom_preview_map.set_position(lat, lon)
+        self._update_zoom_preview()
+
+    def _get_zoom_limits_for_preview(self) -> tuple[int, int]:
+        min_zoom = self._safe_int(self.min_zoom_var.get(), DEFAULT_MIN_ZOOM)
+        max_zoom = self._safe_int(self.max_zoom_var.get(), DEFAULT_MAX_ZOOM)
+        min_zoom = max(0, min(22, min_zoom))
+        max_zoom = max(0, min(22, max_zoom))
+
+        if min_zoom > max_zoom:
+            min_zoom, max_zoom = max_zoom, min_zoom
+
+        return min_zoom, max_zoom
+
+    def _update_zoom_preview(self) -> None:
+        min_zoom, max_zoom = self._get_zoom_limits_for_preview()
+        target_zoom = min_zoom if self.zoom_preview_mode == "min" else max_zoom
+
+        self.zoom_preview_text_var.set(
+            (
+                f"Selected limits: {min_zoom}-{max_zoom}. "
+                f"Current preview zoom: {target_zoom} ({self.zoom_preview_mode})."
+            )
+        )
+
+        if self.zoom_preview_map is None:
+            self.zoom_current_level_var.set("Current map zoom: n/a")
+            return
+
+        osm_zoom = max(0, min(19, target_zoom))
+        self.zoom_preview_map.set_zoom(osm_zoom)
+        self.zoom_current_level_var.set(f"Current map zoom: {osm_zoom}")
+
+    def _update_tileset_availability_note(self) -> None:
+        min_zoom, max_zoom = self._get_zoom_limits_for_preview()
+        self.tileset_availability_var.set(
+            (
+                "Generated tileset availability: "
+                f"tiles will be served from zoom {min_zoom} through zoom {max_zoom}."
+            )
+        )
+
+    def _poll_map_zoom_level(self) -> None:
+        if self.zoom_preview_map is not None:
+            try:
+                current_zoom = float(getattr(self.zoom_preview_map, "zoom"))
+                self.zoom_current_level_var.set(f"Current map zoom: {current_zoom:.1f}")
+            except Exception:
+                try:
+                    current_zoom = float(getattr(self.zoom_preview_map, "get_zoom")())
+                    self.zoom_current_level_var.set(f"Current map zoom: {current_zoom:.1f}")
+                except Exception:
+                    pass
+
+        self.root.after(500, self._poll_map_zoom_level)
 
     def _select_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -556,10 +872,8 @@ class MTUDesktopApp:
             self.file_path_var.set(path)
 
     def _append_log(self, message: str) -> None:
-        self.log_text.configure(state=tk.NORMAL)
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
-        self.log_text.configure(state=tk.DISABLED)
 
     def _save_current_config(self) -> None:
         if self.use_env_credentials_var.get():
@@ -575,8 +889,8 @@ class MTUDesktopApp:
             tileset_id=self.tileset_id_var.get().strip(),
             source_id=self.source_id_var.get().strip(),
             tileset_name=self.tileset_name_var.get().strip(),
-            min_zoom=self._safe_int(self.min_zoom_var.get(), 0),
-            max_zoom=self._safe_int(self.max_zoom_var.get(), 10),
+            min_zoom=self._safe_int(self.min_zoom_var.get(), DEFAULT_MIN_ZOOM),
+            max_zoom=self._safe_int(self.max_zoom_var.get(), DEFAULT_MAX_ZOOM),
             description=self.description_var.get().strip(),
             attribution=self.attribution_var.get().strip(),
             format_hint=self.format_hint_var.get().strip(),
@@ -645,16 +959,35 @@ class MTUDesktopApp:
             return
 
         try:
-            subprocess.run(["setx", "MAPBOX_ACCESS_TOKEN", token], check=True, capture_output=True)
-            subprocess.run(["setx", "MAPBOX_USERNAME", username], check=True, capture_output=True)
+            subprocess.run(
+                ["setx", "MAPBOX_ACCESS_TOKEN", token],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            subprocess.run(
+                ["setx", "MAPBOX_USERNAME", username],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
             self._append_log("Saved Mapbox credentials to user environment variables.")
             messagebox.showinfo(
                 "Environment Saved",
                 "Saved to user environment variables. Restart the app/terminal to pick them up.",
             )
         except subprocess.CalledProcessError as exc:
-            stderr = (exc.stderr or b"").decode("utf-8", errors="ignore")
-            messagebox.showerror("Environment Save Error", stderr or str(exc))
+            stderr_data = exc.stderr or ""
+            if isinstance(stderr_data, bytes):
+                stderr = stderr_data.decode("utf-8", errors="ignore")
+            else:
+                stderr = str(stderr_data)
+            messagebox.showerror("Environment Save Error", stderr.strip() or str(exc))
+        except subprocess.TimeoutExpired:
+            messagebox.showerror(
+                "Environment Save Error",
+                "Saving environment variables timed out. Please try again.",
+            )
 
     def _resolve_credentials(self) -> tuple[str, str]:
         if self.use_env_credentials_var.get():
@@ -800,6 +1133,20 @@ class MTUDesktopApp:
         if self.upload_thread and self.upload_thread.is_alive():
             return
 
+        if not self.dry_run_var.get():
+            proceed = messagebox.askokcancel(
+                "Capacity Risk Notice",
+                (
+                    "This tool cannot fetch your remaining Mapbox capacity units (CUs) before upload.\n\n"
+                    "Please check your Mapbox account usage/limits first. "
+                    "Large datasets and higher zoom ranges can consume billable credits when CU limits "
+                    "are exceeded.\n\n"
+                    "Do you want to continue?"
+                ),
+            )
+            if not proceed:
+                return
+
         self.preflight_ok = self._run_preflight_checks(show_dialog=True)
         if not self.preflight_ok:
             return
@@ -830,8 +1177,8 @@ class MTUDesktopApp:
                 tileset_id=tileset_id,
                 tileset_name=self.tileset_name_var.get().strip(),
                 source_id=source_id,
-                min_zoom=self._safe_int(self.min_zoom_var.get(), 0),
-                max_zoom=self._safe_int(self.max_zoom_var.get(), 10),
+                min_zoom=self._safe_int(self.min_zoom_var.get(), DEFAULT_MIN_ZOOM),
+                max_zoom=self._safe_int(self.max_zoom_var.get(), DEFAULT_MAX_ZOOM),
                 description=self.description_var.get().strip(),
                 attribution=self.attribution_var.get().strip(),
             )
@@ -864,6 +1211,15 @@ class MTUDesktopApp:
             )
             self.status_queue.put(("log", f"Source ID: {config.source_id}"))
             self.status_queue.put(("log", f"Zoom levels: {config.min_zoom}-{config.max_zoom}"))
+            self.status_queue.put(
+                (
+                    "log",
+                    (
+                        "Capacity note: this tool cannot read remaining Mapbox capacity units (CUs) "
+                        "before upload. Verify account capacity to avoid unexpected billable usage."
+                    ),
+                )
+            )
             if self.capacity_guard_enabled_var.get():
                 capacity = self._safe_float(self.capacity_limit_mb_var.get(), 0.0)
                 used = self._safe_float(self.capacity_used_mb_var.get(), 0.0)

@@ -1,6 +1,7 @@
 """Tests for the uploader module."""
 
 import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -177,6 +178,43 @@ class TestTilesetUploader:
             format_names = [f["format_name"] for f in formats]
             assert "GeoJSON" in format_names
             assert "TopoJSON" in format_names
+
+    def test_extract_error_message_from_json(self) -> None:
+        """Test extracting message from JSON CLI output."""
+        raw = '{"message":"Forbidden"}'
+        assert TilesetUploader._extract_error_message(raw) == "Forbidden"
+
+    def test_extract_error_message_from_plain_text(self) -> None:
+        """Test extracting message from plain text output."""
+        raw = "some cli failure"
+        assert TilesetUploader._extract_error_message(raw) == "some cli failure"
+
+    def test_format_tilesets_command_error_forbidden(self) -> None:
+        """Test that forbidden errors include actionable guidance."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader.username = "demo-user"
+
+        result = subprocess.CompletedProcess(
+            args=["tilesets", "upload-source"],
+            returncode=1,
+            stdout="",
+            stderr='{"message":"Forbidden"}',
+        )
+
+        detail = uploader._format_tilesets_command_error(result)
+        assert "Forbidden" in detail
+        assert "MAPBOX_ACCESS_TOKEN" in detail
+        assert "MAPBOX_USERNAME" in detail
+
+    def test_run_tilesets_command_timeout(self) -> None:
+        """Test timeout handling for external tilesets command."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader._tilesets_command = ["tilesets"]
+        uploader._use_inprocess_tilesets = False
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="tilesets", timeout=1)):
+            with pytest.raises(RuntimeError, match="timed out"):
+                uploader._run_tilesets_command(["status", "user.test"], timeout=1)
 
 
 class TestUploadResult:

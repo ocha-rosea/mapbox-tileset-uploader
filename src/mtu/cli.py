@@ -570,7 +570,7 @@ def info() -> None:
    mtu delete-*    Delete sources/tilesets
 
 🔗 LINKS
-   Documentation: https://github.com/im4sea/mapbox-tileset-uploader
+    Documentation: https://github.com/ocha-rosea/mapbox-tileset-uploader
    Mapbox Studio: https://studio.mapbox.com/tilesets/
 """)
 

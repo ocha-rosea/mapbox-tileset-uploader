@@ -79,6 +79,7 @@ dev = [
 windows-build = [
     "pyinstaller>=6.0.0",
     "pyshp>=2.3.0",
+    "tkintermapview>=1.29",
 ]
 
 # All optional dependencies
@@ -102,10 +103,10 @@ mtu = "mtu.cli:main"
 mtu-ui = "mtu.ui:launch_ui"
 
 [project.urls]
-Homepage = "https://github.com/im4sea/mapbox-tileset-uploader"
-Documentation = "https://github.com/im4sea/mapbox-tileset-uploader#readme"
-Repository = "https://github.com/im4sea/mapbox-tileset-uploader"
-Issues = "https://github.com/im4sea/mapbox-tileset-uploader/issues"
+Homepage = "https://github.com/ocha-rosea/mapbox-tileset-uploader"
+Documentation = "https://github.com/ocha-rosea/mapbox-tileset-uploader#readme"
+Repository = "https://github.com/ocha-rosea/mapbox-tileset-uploader"
+Issues = "https://github.com/ocha-rosea/mapbox-tileset-uploader/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mtu"]

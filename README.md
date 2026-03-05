@@ -5,7 +5,7 @@ A CLI tool and Python library to upload GIS data to Mapbox as vector tilesets. S
 [![PyPI version](https://img.shields.io/pypi/v/mtu.svg)](https://pypi.org/project/mtu/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mtu.svg)](https://pypi.org/project/mtu/)
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/mtu.svg)](https://pypi.org/project/mtu/)
-[![CI](https://github.com/im4sea/mapbox-tileset-uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/im4sea/mapbox-tileset-uploader/actions/workflows/ci.yml)
+[![CI](https://github.com/ocha-rosea/mapbox-tileset-uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/ocha-rosea/mapbox-tileset-uploader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -13,16 +13,14 @@ A CLI tool and Python library to upload GIS data to Mapbox as vector tilesets. S
 ## Features
 
 
-- 📤 Upload GIS files to Mapbox Tiling Service (MTS)
-- 🗺️ **Multi-format support**: GeoJSON, TopoJSON, Shapefile, GeoPackage, KML/KMZ, FlatGeobuf, GeoParquet, GPX
-- 🔍 **Geometry validation**: Warns about invalid geometries without modifying data
-- 🌐 Download and upload from remote URLs
-- 🔄 Automatic format detection and conversion to GeoJSON
-- ⚙️ Configurable zoom levels, layer names, and recipes
-- 🔧 Both CLI and Python API available
-- 🖥️ Desktop UI for local GIS file uploads (GeoJSON, zipped Shapefile, and more)
-- 📦 Modular architecture with optional dependencies
-- 🧩 Extensible converter system
+- **Upload**: GIS files to Mapbox Tiling Service (MTS)
+- **Multi-format support**: GeoJSON, TopoJSON, Shapefile, GeoPackage, KML/KMZ, FlatGeobuf, GeoParquet, GPX
+- **Geometry validation**: warns about invalid geometries without modifying data
+- **Remote sources**: download and upload from URLs
+- **Conversion pipeline**: automatic format detection and conversion to GeoJSON
+- **Configurable output**: zoom levels, layer names, and recipes
+- **Interfaces**: CLI, Python API, and desktop UI
+- **Architecture**: modular converter system with optional dependencies
 
 ## Installation
 
@@ -60,15 +58,15 @@ pip install mtu[all]
 ### Install from Source
 
 ```bash
-git clone https://github.com/im4sea/mtu.git
-cd mtu
+git clone https://github.com/ocha-rosea/mapbox-tileset-uploader.git
+cd mapbox-tileset-uploader
 pip install -e ".[all]"
 ```
 
 ## Supported Formats
 
 | Format | Extensions | Dependencies | Notes |
-|--------|-----------|--------------|-------|
+| ------ | ---------- | ------------ | ----- |
 | GeoJSON | `.geojson`, `.json` | None | Native support |
 | TopoJSON | `.topojson` | None | Full decoder with transform support |
 | Shapefile | `.shp`, `.zip` | `pyshp` | Supports zipped shapefiles |
@@ -79,6 +77,7 @@ pip install -e ".[all]"
 | GPX | `.gpx` | `gpxpy` | Tracks, routes, waypoints |
 
 Check available formats with:
+
 ```bash
 mtu formats
 ```
@@ -87,58 +86,68 @@ mtu formats
 
 ```mermaid
 flowchart LR
-    subgraph Input["Input Formats"]
-        GeoJSON[GeoJSON]
-        TopoJSON[TopoJSON]
-        SHP[Shapefile]
-        GPKG[GeoPackage]
-        KML[KML/KMZ]
-        FGB[FlatGeobuf]
-        GPQ[GeoParquet]
-        GPX[GPX]
-    end
+  subgraph Interfaces["Entry Points"]
+    CLI[CLI: mtu]
+    UI[Desktop UI: mtu ui]
+    API[Python API]
+  end
 
-    subgraph Converters["Format Converters"]
-        Registry[Converter Registry]
-        BaseConv[Base Converter]
-    end
+  subgraph Core["Core Upload Engine src/mtu/uploader.py"]
+    Input["Input handler file or URL"]
+    Detect["Format detection"]
+    Registry["Converter registry"]
+    Convert["Format converter to GeoJSON"]
+    Validate["Geometry validator optional"]
+    Recipe["Recipe and tileset config builder"]
+    Upload["Upload and publish orchestration"]
+  end
 
-    subgraph Processing["Processing"]
-        Validator[Geometry Validator]
-        Warnings[Warnings Only]
-    end
+  subgraph Integrations["External Services"]
+    Files["Local or remote GIS data"]
+    MbxCLI["Mapbox Tilesets CLI"]
+    MTS["Mapbox Tiling Service"]
+    Studio["Mapbox Studio tileset"]
+  end
 
-    subgraph Output["Mapbox"]
-        MTS[Mapbox Tiling Service]
-        Tileset[Vector Tileset]
-    end
+  CLI --> Input
+  UI --> Input
+  API --> Input
 
-    Input --> Registry
-    Registry --> BaseConv
-    BaseConv --> |GeoJSON| Validator
-    Validator --> |Validate| Warnings
-    Validator --> |Upload| MTS
-    MTS --> Tileset
+  Files --> Input
+  Input --> Detect --> Registry --> Convert --> Validate --> Recipe --> Upload
+  Upload --> MbxCLI --> MTS --> Studio
 ```
+
+## Data Flow Diagram
 
 ```mermaid
 flowchart TD
-    A[Upload Command] --> B{Source Type}
-    B -->|URL| C[Download File]
-    B -->|File| D[Read File]
-    C --> E[Detect Format]
-    D --> E
-    E --> F[Get Converter]
-    F --> G[Convert to GeoJSON]
-    G --> H{Validate?}
-    H -->|Yes| I[Geometry Validator]
-    H -->|No| J[Upload Source]
-    I --> |Warnings| K[Log Warnings]
-    K --> J
-    J --> L[Create/Update Tileset]
-    L --> M[Publish Tileset]
-    M --> N[Wait for Job]
-    N --> O[Success]
+  A["User starts upload from CLI, Desktop UI, or API"] --> B{Input source}
+  B -->|Local file| C[Read from disk]
+  B -->|Remote URL| D[Download to temp file]
+
+  C --> E[Detect extension / format]
+  D --> E
+
+  E --> F[Resolve converter from registry]
+  F --> G["Convert input to GeoJSON FeatureCollection"]
+  G --> H{Validation enabled?}
+
+  H -->|Yes| I[Run geometry validator]
+  I --> J[Collect warnings]
+  H -->|No| K[Skip validator]
+
+  J --> L["Build source and recipe payload"]
+  K --> L
+
+  L --> M[Create/replace tileset source]
+  M --> N[Create/update recipe]
+  N --> O[Publish tileset]
+  O --> P[Poll publish job status]
+  P --> Q{Completed?}
+
+  Q -->|Success| R["Return UploadResult and Studio link"]
+  Q -->|Failed| S[Return parsed actionable error]
 ```
 
 ## Prerequisites
@@ -500,6 +509,9 @@ From the project root:
 ./scripts/build_windows_exe.ps1 -PythonPath C:\Users\<you>\mtu-winbuild\Scripts\python.exe
 ```
 
+PyInstaller may generate `.spec` files during local packaging. These are optional build recipes;
+the project build script above does not require committing them.
+
 This creates a self-contained app in `dist/mtu-desktop/` (recommended, onedir mode).
 
 To create a portable ZIP (shareable folder build):
@@ -527,6 +539,7 @@ Notes:
 - The generated executable includes Python runtime and dependencies.
 - If your system `tilesets.exe` launcher is broken, MTU automatically falls back to the in-process `mapbox-tilesets` module.
 - For best reliability and startup speed, prefer onedir mode.
+- UI startup window state (maximized/full-size on launch) is controlled in `src/mtu/ui.py` and applies to both source and packaged builds.
 
 ### GitHub Release Automation (Semantic + Portable ZIP)
 
@@ -558,8 +571,8 @@ The portable ZIP is versioned on releases as:
 ### Setup
 
 ```bash
-git clone https://github.com/im4sea/mtu.git
-cd mtu
+git clone https://github.com/ocha-rosea/mapbox-tileset-uploader.git
+cd mapbox-tileset-uploader
 pip install -e ".[all]"
 ```
 
