@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import threading
-import webbrowser
 import tempfile
+import threading
+import tkinter as tk
+import webbrowser
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
-import tkinter as tk
 
 try:
     from tkintermapview import TkinterMapView
@@ -20,8 +20,15 @@ except Exception:
     TkinterMapView = None
 
 from mtu.converters import get_supported_formats
-from mtu.uploader import TilesetConfig, TilesetUploader, UploadResult
-
+from mtu.uploader import (
+    DEFAULT_UPLOAD_SOFT_CAP_BYTES,
+    DEFAULT_UPLOAD_SOFT_CAP_GB,
+    MAPBOX_MAX_SOURCE_FILE_BYTES,
+    MAPBOX_MAX_SOURCE_FILE_SIZE_GB,
+    TilesetConfig,
+    TilesetUploader,
+    UploadResult,
+)
 
 _SINGLE_INSTANCE_LOCK_FILE: object | None = None
 DEFAULT_MIN_ZOOM = 6
@@ -47,6 +54,7 @@ class UIConfig:
     capacity_guard_enabled: bool = False
     capacity_limit_mb: float = 0.0
     capacity_used_mb: float = 0.0
+    use_mapbox_full_upload_cap: bool = False
 
 
 def get_config_path() -> Path:
@@ -84,6 +92,7 @@ def load_ui_config(config_path: Path | None = None) -> UIConfig:
         capacity_guard_enabled=bool(safe_data["capacity_guard_enabled"]),
         capacity_limit_mb=float(safe_data["capacity_limit_mb"]),
         capacity_used_mb=float(safe_data["capacity_used_mb"]),
+        use_mapbox_full_upload_cap=bool(safe_data["use_mapbox_full_upload_cap"]),
     )
 
 
@@ -139,6 +148,9 @@ class MTUDesktopApp:
         self.capacity_guard_enabled_var = tk.BooleanVar(value=self.saved.capacity_guard_enabled)
         self.capacity_limit_mb_var = tk.StringVar(value=str(self.saved.capacity_limit_mb or ""))
         self.capacity_used_mb_var = tk.StringVar(value=str(self.saved.capacity_used_mb or ""))
+        self.use_mapbox_full_upload_cap_var = tk.BooleanVar(
+            value=self.saved.use_mapbox_full_upload_cap
+        )
         self.generated_tileset_id_var = tk.StringVar(value="")
         self.generated_source_id_var = tk.StringVar(value="")
         self.validate_var = tk.BooleanVar(value=True)
@@ -215,14 +227,22 @@ class MTUDesktopApp:
         main_shell.pack(fill=tk.BOTH, expand=True)
 
         self.main_canvas = tk.Canvas(main_shell, background="white", highlightthickness=0)
-        main_scrollbar = ttk.Scrollbar(main_shell, orient=tk.VERTICAL, command=self.main_canvas.yview)
+        main_scrollbar = ttk.Scrollbar(
+            main_shell,
+            orient=tk.VERTICAL,
+            command=self.main_canvas.yview,
+        )
         self.main_canvas.configure(yscrollcommand=main_scrollbar.set)
 
         self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         container = ttk.Frame(self.main_canvas, style="App.TFrame")
-        self.main_canvas_window = self.main_canvas.create_window((0, 0), window=container, anchor="nw")
+        self.main_canvas_window = self.main_canvas.create_window(
+            (0, 0),
+            window=container,
+            anchor="nw",
+        )
 
         container.bind(
             "<Configure>",
@@ -230,7 +250,10 @@ class MTUDesktopApp:
         )
         self.main_canvas.bind(
             "<Configure>",
-            lambda event: self.main_canvas.itemconfigure(self.main_canvas_window, width=event.width),
+            lambda event: self.main_canvas.itemconfigure(
+                self.main_canvas_window,
+                width=event.width,
+            ),
         )
         self.main_canvas.bind(
             "<Enter>",
@@ -289,7 +312,12 @@ class MTUDesktopApp:
         ttk.Label(file_frame, text="File", style="App.TLabel").grid(row=0, column=0, sticky=tk.W)
         file_entry = ttk.Entry(file_frame, textvariable=self.file_path_var, width=80)
         file_entry.grid(row=0, column=1, sticky=tk.EW, padx=(8, 8))
-        ttk.Button(file_frame, text="Browse", command=self._select_file, style="Primary.TButton").grid(
+        ttk.Button(
+            file_frame,
+            text="Browse",
+            command=self._select_file,
+            style="Primary.TButton",
+        ).grid(
             row=0, column=2, sticky=tk.E
         )
 
@@ -376,6 +404,16 @@ class MTUDesktopApp:
             wraplength=500,
             justify=tk.LEFT,
         ).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ttk.Label(
+            creds_frame,
+            text=(
+                "Desktop uploads do not send a browser URL/referrer. "
+                "Mapbox access tokens with URL restrictions may fail with 403 Forbidden."
+            ),
+            style="App.TLabel",
+            wraplength=500,
+            justify=tk.LEFT,
+        ).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
         creds_frame.columnconfigure(1, weight=1)
         self._on_credentials_mode_changed()
 
@@ -480,11 +518,14 @@ class MTUDesktopApp:
         ttk.Label(
             limits_frame,
             text=(
-                "Mapbox zoom range is typically 0-22. This app defaults to min 6 and max 12. "
                 "Mapbox zoom range is typically 0-22. This app defaults to min 6 and max 10. "
-                "Tileset generation consumes Mapbox capacity units (CUs). This tool cannot read your "
-                "remaining account CUs before upload. Check your Mapbox account usage/limits first—high "
-                "zoom ranges and heavy datasets can consume billable credits when CU limits are exceeded."
+                "To reduce accidental large uploads, this app caps input files at 1 GB by default; "
+                "you can opt in to Mapbox's full 20 GB per-file cap using the toggle below. "
+                "Tileset generation consumes Mapbox capacity units (CUs). "
+                "This tool cannot read your remaining account CUs before "
+                "upload. Check your Mapbox account usage/limits first—"
+                "high zoom ranges and heavy datasets can consume billable "
+                "credits when CU limits are exceeded."
             ),
             style="App.TLabel",
             wraplength=420,
@@ -493,32 +534,44 @@ class MTUDesktopApp:
 
         ttk.Checkbutton(
             limits_frame,
-            text="Enable capacity guard (block upload when projected usage exceeds your configured plan limit)",
-            variable=self.capacity_guard_enabled_var,
+            text=(
+                "Use Mapbox full upload cap (20 GB per source file) "
+                "instead of app default cap (1 GB)"
+            ),
+            variable=self.use_mapbox_full_upload_cap_var,
         ).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(8, 0))
 
+        ttk.Checkbutton(
+            limits_frame,
+            text=(
+                "Enable capacity guard (block upload when projected usage exceeds "
+                "your configured plan limit)"
+            ),
+            variable=self.capacity_guard_enabled_var,
+        ).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(8, 0))
+
         ttk.Label(limits_frame, text="Plan Capacity (MB)", style="App.TLabel").grid(
-            row=2, column=0, sticky=tk.W, pady=(8, 0)
+            row=3, column=0, sticky=tk.W, pady=(8, 0)
         )
         ttk.Entry(limits_frame, textvariable=self.capacity_limit_mb_var, width=16).grid(
-            row=2, column=1, sticky=tk.W, padx=(8, 20), pady=(8, 0)
+            row=3, column=1, sticky=tk.W, padx=(8, 20), pady=(8, 0)
         )
 
         ttk.Label(limits_frame, text="Currently Used (MB)", style="App.TLabel").grid(
-            row=2, column=2, sticky=tk.W, pady=(8, 0)
+            row=3, column=2, sticky=tk.W, pady=(8, 0)
         )
         ttk.Entry(limits_frame, textvariable=self.capacity_used_mb_var, width=16).grid(
-            row=2, column=3, sticky=tk.W, padx=(8, 0), pady=(8, 0)
+            row=3, column=3, sticky=tk.W, padx=(8, 0), pady=(8, 0)
         )
 
         ttk.Label(
             limits_frame,
             text="OpenStreetMap zoom preview",
             style="App.TLabel",
-        ).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
+        ).grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
 
         map_preview_host = tk.Frame(limits_frame, bg="white", bd=1, relief=tk.SOLID)
-        map_preview_host.grid(row=4, column=0, columnspan=4, sticky=tk.EW, pady=(6, 0))
+        map_preview_host.grid(row=5, column=0, columnspan=4, sticky=tk.EW, pady=(6, 0))
         map_preview_host.columnconfigure(0, weight=1)
 
         if TkinterMapView is None:
@@ -580,7 +633,7 @@ class MTUDesktopApp:
             style="App.TLabel",
             wraplength=420,
             justify=tk.LEFT,
-        ).grid(row=5, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+        ).grid(row=6, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
         ttk.Label(
             limits_frame,
@@ -588,21 +641,21 @@ class MTUDesktopApp:
             style="App.TLabel",
             wraplength=420,
             justify=tk.LEFT,
-        ).grid(row=6, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+        ).grid(row=7, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         ttk.Label(
             limits_frame,
             textvariable=self.zoom_current_level_var,
             style="App.TLabel",
             justify=tk.LEFT,
-        ).grid(row=7, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+        ).grid(row=8, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         ttk.Button(
             limits_frame,
             text="Open Mapbox Pricing",
             command=self._open_pricing_page,
             style="Accent.TButton",
-        ).grid(row=8, column=3, sticky=tk.E, pady=(10, 0))
+        ).grid(row=9, column=3, sticky=tk.E, pady=(10, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill=tk.X, pady=(10, 0))
@@ -678,7 +731,8 @@ class MTUDesktopApp:
         tk.Label(
             card,
             text=(
-                "Upload GIS files (GeoJSON, zipped Shapefile, and more) to Mapbox as vector tilesets."
+                "Upload GIS files (GeoJSON, zipped Shapefile, and more) to "
+                "Mapbox as vector tilesets."
             ),
             bg="#f8fbfd",
             fg="#333333",
@@ -821,10 +875,10 @@ class MTUDesktopApp:
         target_zoom = min_zoom if self.zoom_preview_mode == "min" else max_zoom
 
         self.zoom_preview_text_var.set(
-            (
+
                 f"Selected limits: {min_zoom}-{max_zoom}. "
                 f"Current preview zoom: {target_zoom} ({self.zoom_preview_mode})."
-            )
+
         )
 
         if self.zoom_preview_map is None:
@@ -838,10 +892,10 @@ class MTUDesktopApp:
     def _update_tileset_availability_note(self) -> None:
         min_zoom, max_zoom = self._get_zoom_limits_for_preview()
         self.tileset_availability_var.set(
-            (
+
                 "Generated tileset availability: "
                 f"tiles will be served from zoom {min_zoom} through zoom {max_zoom}."
-            )
+
         )
 
     def _poll_map_zoom_level(self) -> None:
@@ -862,7 +916,11 @@ class MTUDesktopApp:
         path = filedialog.askopenfilename(
             title="Select GIS file",
             filetypes=[
-                ("GIS files", "*.geojson *.json *.zip *.shp *.topojson *.gpkg *.kml *.kmz *.fgb *.parquet *.geoparquet *.gpx"),
+                (
+                    "GIS files",
+                    "*.geojson *.json *.zip *.shp *.topojson *.gpkg *.kml *.kmz "
+                    "*.fgb *.parquet *.geoparquet *.gpx",
+                ),
                 ("GeoJSON", "*.geojson *.json"),
                 ("Shapefile ZIP", "*.zip"),
                 ("All files", "*.*"),
@@ -897,6 +955,7 @@ class MTUDesktopApp:
             capacity_guard_enabled=self.capacity_guard_enabled_var.get(),
             capacity_limit_mb=self._safe_float(self.capacity_limit_mb_var.get(), 0.0),
             capacity_used_mb=self._safe_float(self.capacity_used_mb_var.get(), 0.0),
+            use_mapbox_full_upload_cap=self.use_mapbox_full_upload_cap_var.get(),
         )
 
         try:
@@ -1021,7 +1080,8 @@ class MTUDesktopApp:
             if show_dialog:
                 messagebox.showwarning(
                     "Missing tilesets CLI",
-                    "No usable mapbox-tilesets runtime was found. Install mapbox-tilesets and reopen the app.",
+                    "No usable mapbox-tilesets runtime was found. Install "
+                    "mapbox-tilesets and reopen the app.",
                 )
             return False
 
@@ -1050,7 +1110,10 @@ class MTUDesktopApp:
 
         if result.returncode != 0:
             error_msg = result.stderr.strip() or "unknown error"
-            self._append_log(f"Preflight failed: tilesets CLI returned non-zero exit ({error_msg}).")
+            self._append_log(
+                "Preflight failed: "
+                f"tilesets CLI returned non-zero exit ({error_msg})."
+            )
             self.upload_button.configure(state=tk.DISABLED)
             if show_dialog:
                 messagebox.showwarning(
@@ -1085,6 +1148,29 @@ class MTUDesktopApp:
 
         if not Path(file_path).exists():
             return "Selected file does not exist."
+
+        file_size_bytes = Path(file_path).stat().st_size
+        file_size_gb = file_size_bytes / (1024**3)
+        if file_size_bytes > MAPBOX_MAX_SOURCE_FILE_BYTES:
+            return (
+                f"File is {file_size_gb:.2f} GB, which exceeds Mapbox's "
+                f"{MAPBOX_MAX_SOURCE_FILE_SIZE_GB} GB per-file upload limit. "
+                "Reduce/split the dataset and try again."
+            )
+
+        if self.use_mapbox_full_upload_cap_var.get():
+            app_cap_bytes = MAPBOX_MAX_SOURCE_FILE_BYTES
+            app_cap_gb = MAPBOX_MAX_SOURCE_FILE_SIZE_GB
+        else:
+            app_cap_bytes = DEFAULT_UPLOAD_SOFT_CAP_BYTES
+            app_cap_gb = DEFAULT_UPLOAD_SOFT_CAP_GB
+
+        if file_size_bytes > app_cap_bytes:
+            return (
+                f"File is {file_size_gb:.2f} GB, above this app's current upload cap of "
+                f"{app_cap_gb} GB. Enable 'Use Mapbox full upload cap "
+                "(20 GB)' to allow larger files."
+            )
 
         token, username = self._resolve_credentials()
 
@@ -1137,9 +1223,11 @@ class MTUDesktopApp:
             proceed = messagebox.askokcancel(
                 "Capacity Risk Notice",
                 (
-                    "This tool cannot fetch your remaining Mapbox capacity units (CUs) before upload.\n\n"
+                    "This tool cannot fetch your remaining Mapbox "
+                    "capacity units (CUs) before upload.\n\n"
                     "Please check your Mapbox account usage/limits first. "
-                    "Large datasets and higher zoom ranges can consume billable credits when CU limits "
+                    "Large datasets and higher zoom ranges can consume "
+                    "billable credits when CU limits "
                     "are exceeded.\n\n"
                     "Do you want to continue?"
                 ),
@@ -1167,7 +1255,9 @@ class MTUDesktopApp:
         try:
             tileset_id = self.tileset_id_var.get().strip()
             if not tileset_id:
-                tileset_id = TilesetUploader._generate_tileset_id(self.tileset_name_var.get().strip())
+                tileset_id = TilesetUploader._generate_tileset_id(
+                    self.tileset_name_var.get().strip()
+                )
 
             source_id = self.source_id_var.get().strip()
             if not source_id:
@@ -1187,6 +1277,7 @@ class MTUDesktopApp:
                 access_token=self._resolve_credentials()[0],
                 username=self._resolve_credentials()[1],
                 validate_geometry=self.validate_var.get(),
+                use_mapbox_full_upload_cap=self.use_mapbox_full_upload_cap_var.get(),
             )
 
             selected_format = self.format_lookup.get(self.format_hint_var.get().strip(), "")
@@ -1215,11 +1306,26 @@ class MTUDesktopApp:
                 (
                     "log",
                     (
-                        "Capacity note: this tool cannot read remaining Mapbox capacity units (CUs) "
+                        "Capacity note: this tool cannot read remaining "
+                        "Mapbox capacity units (CUs) "
                         "before upload. Verify account capacity to avoid unexpected billable usage."
                     ),
                 )
             )
+            if self.use_mapbox_full_upload_cap_var.get():
+                self.status_queue.put(
+                    (
+                        "log",
+                        "Upload cap mode: Mapbox full cap enabled (20 GB per source file).",
+                    )
+                )
+            else:
+                self.status_queue.put(
+                    (
+                        "log",
+                        "Upload cap mode: app default cap enabled (1 GB per source file).",
+                    )
+                )
             if self.capacity_guard_enabled_var.get():
                 capacity = self._safe_float(self.capacity_limit_mb_var.get(), 0.0)
                 used = self._safe_float(self.capacity_used_mb_var.get(), 0.0)
@@ -1276,7 +1382,12 @@ class MTUDesktopApp:
 
         if result.success:
             self.status_queue.put(("log", "Upload successful."))
-            self.status_queue.put(("log", f"Final tileset name: {self.tileset_name_var.get().strip()}"))
+            self.status_queue.put(
+                (
+                    "log",
+                    f"Final tileset name: {self.tileset_name_var.get().strip()}",
+                )
+            )
             self.status_queue.put(("log", f"Tileset ID: {result.tileset_id}"))
             if not result.dry_run:
                 self.status_queue.put(

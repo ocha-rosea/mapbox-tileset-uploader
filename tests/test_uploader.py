@@ -2,11 +2,19 @@
 
 import os
 import subprocess
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from mtu.uploader import TilesetConfig, TilesetUploader, UploadResult
+from mtu.uploader import (
+    DEFAULT_UPLOAD_SOFT_CAP_BYTES,
+    MAPBOX_MAX_SOURCE_FILE_BYTES,
+    TilesetConfig,
+    TilesetUploader,
+    UploadResult,
+)
 
 
 class TestTilesetConfig:
@@ -212,9 +220,50 @@ class TestTilesetUploader:
         uploader._tilesets_command = ["tilesets"]
         uploader._use_inprocess_tilesets = False
 
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="tilesets", timeout=1)):
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="tilesets", timeout=1),
+        ):
             with pytest.raises(RuntimeError, match="timed out"):
                 uploader._run_tilesets_command(["status", "user.test"], timeout=1)
+
+    def test_validate_source_file_size_allows_limit(self) -> None:
+        """Test that files at limit are accepted."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader._soft_upload_cap_bytes = MAPBOX_MAX_SOURCE_FILE_BYTES
+        uploader._soft_upload_cap_gb = 20
+
+        with patch(
+            "pathlib.Path.stat",
+            return_value=SimpleNamespace(st_size=MAPBOX_MAX_SOURCE_FILE_BYTES),
+        ):
+            uploader._validate_source_file_size(Path("dummy.geojson"), label="Input file")
+
+    def test_validate_source_file_size_rejects_oversized(self) -> None:
+        """Test that oversized files are rejected with clear message."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader._soft_upload_cap_bytes = MAPBOX_MAX_SOURCE_FILE_BYTES
+        uploader._soft_upload_cap_gb = 20
+
+        with patch(
+            "pathlib.Path.stat",
+            return_value=SimpleNamespace(st_size=MAPBOX_MAX_SOURCE_FILE_BYTES + 1),
+        ):
+            with pytest.raises(ValueError, match="20 GB per-file source upload limit"):
+                uploader._validate_source_file_size(Path("dummy.geojson"), label="Input file")
+
+    def test_validate_source_file_size_rejects_above_default_soft_cap(self) -> None:
+        """Test default 1GB soft cap enforcement."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader._soft_upload_cap_bytes = DEFAULT_UPLOAD_SOFT_CAP_BYTES
+        uploader._soft_upload_cap_gb = 1
+
+        with patch(
+            "pathlib.Path.stat",
+            return_value=SimpleNamespace(st_size=DEFAULT_UPLOAD_SOFT_CAP_BYTES + 1),
+        ):
+            with pytest.raises(ValueError, match="current upload cap of 1 GB"):
+                uploader._validate_source_file_size(Path("dummy.geojson"), label="Input file")
 
 
 class TestUploadResult:

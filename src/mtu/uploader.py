@@ -10,17 +10,23 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from click.testing import CliRunner
 import requests
+from click.testing import CliRunner
 
 from mtu.converters import get_converter, get_supported_formats
 from mtu.converters.base import ConversionResult
 from mtu.validators import GeometryValidator, ValidationResult
+
+MAPBOX_MAX_SOURCE_FILE_BYTES = 20 * 1024 * 1024 * 1024
+MAPBOX_MAX_SOURCE_FILE_SIZE_GB = 20
+DEFAULT_UPLOAD_SOFT_CAP_BYTES = 1 * 1024 * 1024 * 1024
+DEFAULT_UPLOAD_SOFT_CAP_GB = 1
 
 
 @dataclass
@@ -83,6 +89,7 @@ class TilesetUploader:
         access_token: str | None = None,
         username: str | None = None,
         validate_geometry: bool = True,
+        use_mapbox_full_upload_cap: bool = False,
     ) -> None:
         """
         Initialize the uploader.
@@ -91,10 +98,23 @@ class TilesetUploader:
             access_token: Mapbox access token. If not provided, uses MAPBOX_ACCESS_TOKEN env var.
             username: Mapbox username. If not provided, uses MAPBOX_USERNAME env var.
             validate_geometry: Whether to validate geometries and warn about issues.
+            use_mapbox_full_upload_cap: If True, use the Mapbox per-file limit (20 GB).
+                If False, apply MTU's default upload cap (1 GB).
         """
         self.access_token = access_token or os.environ.get("MAPBOX_ACCESS_TOKEN")
         self.username = username or os.environ.get("MAPBOX_USERNAME")
         self.validate_geometry = validate_geometry
+        self.use_mapbox_full_upload_cap = use_mapbox_full_upload_cap
+        self._soft_upload_cap_bytes = (
+            MAPBOX_MAX_SOURCE_FILE_BYTES
+            if use_mapbox_full_upload_cap
+            else DEFAULT_UPLOAD_SOFT_CAP_BYTES
+        )
+        self._soft_upload_cap_gb = (
+            MAPBOX_MAX_SOURCE_FILE_SIZE_GB
+            if use_mapbox_full_upload_cap
+            else DEFAULT_UPLOAD_SOFT_CAP_GB
+        )
 
         if not self.access_token:
             raise ValueError(
@@ -268,6 +288,7 @@ class TilesetUploader:
             UploadResult with upload details.
         """
         file_path = Path(file_path)
+        self._validate_source_file_size(file_path, label="Input file")
         self._ensure_config_ids(config)
 
         if not config.tileset_id:
@@ -359,6 +380,11 @@ class TilesetUploader:
                 geojson_path = Path(f.name)
 
             try:
+                self._validate_source_file_size(
+                    geojson_path,
+                    label="Converted GeoJSON payload",
+                )
+
                 # Upload source
                 self._emit_progress(
                     progress_callback,
@@ -481,6 +507,27 @@ class TilesetUploader:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
+    def _validate_source_file_size(self, file_path: Path, label: str = "File") -> None:
+        """Validate that a file can be uploaded as a Mapbox source file."""
+        file_size_bytes = file_path.stat().st_size
+        file_size_gb = file_size_bytes / (1024**3)
+
+        if file_size_bytes > MAPBOX_MAX_SOURCE_FILE_BYTES:
+            raise ValueError(
+                f"{label} is {file_size_gb:.2f} GB, which exceeds Mapbox's "
+                f"{MAPBOX_MAX_SOURCE_FILE_SIZE_GB} GB per-file source upload limit. "
+                "Reduce/split the dataset and try again."
+            )
+
+        if file_size_bytes <= self._soft_upload_cap_bytes:
+            return
+
+        raise ValueError(
+            f"{label} is {file_size_gb:.2f} GB, above MTU's current upload cap "
+            f"of {self._soft_upload_cap_gb} GB. "
+            "Enable Mapbox full upload cap mode to allow larger files (up to 20 GB)."
+        )
+
     def _run_tilesets_command(
         self,
         args: list[str],
@@ -546,7 +593,11 @@ class TilesetUploader:
         stderr_message = self._extract_error_message(result.stderr or "")
         stdout_message = self._extract_error_message(result.stdout or "")
 
-        message = stderr_message or stdout_message or f"Command exited with code {result.returncode}"
+        message = (
+            stderr_message
+            or stdout_message
+            or f"Command exited with code {result.returncode}"
+        )
         lowered = message.lower()
 
         if "forbidden" in lowered:
@@ -557,7 +608,8 @@ class TilesetUploader:
 
         if "unauthorized" in lowered:
             return (
-                f"{message}. Your MAPBOX_ACCESS_TOKEN appears invalid or expired; generate a new token "
+                f"{message}. Your MAPBOX_ACCESS_TOKEN appears invalid or "
+                "expired; generate a new token "
                 "and retry."
             )
 

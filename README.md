@@ -5,10 +5,7 @@ Mapbox Tileset Uploader (`mtu`) is a Python package for preparing and publishing
 [![PyPI version](https://img.shields.io/pypi/v/mtu.svg)](https://pypi.org/project/mtu/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mtu.svg)](https://pypi.org/project/mtu/)
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/mtu.svg)](https://pypi.org/project/mtu/)
-[![CI](https://github.com/ocha-rosea/mapbox-tileset-uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/ocha-rosea/mapbox-tileset-uploader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 ## Features
 
@@ -19,6 +16,7 @@ Mapbox Tileset Uploader (`mtu`) is a Python package for preparing and publishing
 - **Remote sources**: download and upload from URLs
 - **Conversion pipeline**: automatic format detection and conversion to GeoJSON
 - **Configurable output**: zoom levels, layer names, and recipes
+- **Upload guardrails**: default 1 GB upload cap across UI, CLI, and API (optional full-cap mode up to Mapbox's 20 GB per-file limit); backend always enforces Mapbox's hard 20 GB limit
 - **Interfaces**: CLI, Python API, and desktop UI
 - **Architecture**: modular converter system with optional dependencies
 
@@ -187,6 +185,16 @@ mtu upload \
   --name "My Tileset"
 ```
 
+By default, upload size is capped at 1 GB. To allow larger files (up to Mapbox's 20 GB limit):
+
+```bash
+mtu upload \
+  --file large-data.geojson \
+  --id my-tileset \
+  --name "My Tileset" \
+  --use-mapbox-full-upload-cap
+```
+
 ### Desktop UI (Windows/macOS/Linux)
 
 Launch the desktop uploader interface:
@@ -306,6 +314,13 @@ uploader = TilesetUploader()
 uploader = TilesetUploader(
     access_token="your-token",
     username="your-username"
+)
+
+# Optional: allow larger files up to Mapbox's 20 GB per-file limit
+uploader_full_cap = TilesetUploader(
+  access_token="your-token",
+  username="your-username",
+  use_mapbox_full_upload_cap=True,
 )
 
 # Configure the tileset
@@ -449,44 +464,7 @@ Recipe file example (`custom-recipe.json`):
 }
 ```
 
-## GitHub Actions Integration
-
-Use in your CI/CD pipeline:
-
-```yaml
-name: Upload Tilesets
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  upload:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install mtu
-
-      - name: Upload tileset
-        env:
-          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
-          MAPBOX_USERNAME: ${{ secrets.MAPBOX_USERNAME }}
-        run: |
-          mtu upload \
-            --file data.geojson \
-            --id my-tileset \
-            --name "My Tileset"
-```
-
-## Development
+## Advanced
 
 ### Build Windows Executable (Self-Contained)
 
@@ -540,64 +518,6 @@ Notes:
 - If your system `tilesets.exe` launcher is broken, MTU automatically falls back to the in-process `mapbox-tilesets` module.
 - For best reliability and startup speed, prefer onedir mode.
 - UI startup window state (maximized/full-size on launch) is controlled in `src/mtu/ui.py` and applies to both source and packaged builds.
-
-### GitHub Release Automation (Semantic + Portable ZIP)
-
-This repository includes a manual release workflow with semantic version bumping.
-
-In GitHub Actions, run the `Release` workflow manually and choose:
-
-- `bump_type`: `patch`, `minor`, or `major`
-- `prerelease`: `true/false`
-- `dry_run`: `true/false`
-
-When `dry_run` is `false`, the workflow will:
-
-1. Bump version in `pyproject.toml` and push commit
-2. Build Python distributions (`.whl`, `.tar.gz`)
-3. Build Linux and Windows desktop portable artifacts
-4. Create a GitHub Release and attach all artifacts
-5. Publish the Python package to PyPI (if PyPI environment is configured)
-
-Release assets include:
-
-- Wheel: `*.whl`
-- Source dist: `*.tar.gz`
-- Linux portable archive: `ROSEA-MTU-v<version>-linux-portable.tar.gz`
-- Windows portable app: `ROSEA-MTU-v<version>-portable.zip`
-
-The Windows portable ZIP is versioned on releases as:
-`ROSEA-MTU-v<version>-portable.zip`
-
-The Linux portable archive is versioned on releases as:
-`ROSEA-MTU-v<version>-linux-portable.tar.gz`
-
-### Setup
-
-```bash
-git clone https://github.com/ocha-rosea/mapbox-tileset-uploader.git
-cd mapbox-tileset-uploader
-pip install -e ".[all]"
-```
-
-### Run Tests
-
-```bash
-pytest
-```
-
-### Code Formatting
-
-```bash
-black src tests
-ruff check src tests
-```
-
-### Type Checking
-
-```bash
-mypy src
-```
 
 ## License
 

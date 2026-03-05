@@ -202,6 +202,11 @@ def validate(
 @click.option("--recipe", "-r", type=click.Path(exists=True), help="Custom recipe JSON file")
 @click.option("--work-dir", "-w", type=click.Path(), help="Working directory for temp files")
 @click.option("--no-validate", is_flag=True, help="Skip geometry validation")
+@click.option(
+    "--use-mapbox-full-upload-cap",
+    is_flag=True,
+    help="Allow files above the default 1 GB MTU cap up to Mapbox's 20 GB limit",
+)
 @click.option("--dry-run", is_flag=True, help="Validate without uploading")
 @click.option("--token", envvar="MAPBOX_ACCESS_TOKEN", help="Mapbox access token")
 @click.option("--username", envvar="MAPBOX_USERNAME", help="Mapbox username")
@@ -220,6 +225,7 @@ def upload(
     recipe: str | None,
     work_dir: str | None,
     no_validate: bool,
+    use_mapbox_full_upload_cap: bool,
     dry_run: bool,
     token: str | None,
     username: str | None,
@@ -277,6 +283,7 @@ def upload(
             access_token=token,
             username=username,
             validate_geometry=not no_validate,
+            use_mapbox_full_upload_cap=use_mapbox_full_upload_cap,
         )
     except ValueError as e:
         raise click.ClickException(str(e))
