@@ -151,10 +151,12 @@ flowchart TD
 ## Prerequisites
 
 1. **Mapbox Account**: Sign up at [mapbox.com](https://www.mapbox.com/)
-2. **Access Token**: Create a token with the following scopes:
+2. **Access Token**: Use a non-URL-restricted token with the following scopes:
    - `tilesets:write`
    - `tilesets:read`
    - `tilesets:list`
+
+  URL-restricted tokens can fail for CLI/desktop uploads because these flows do not send browser referrer URLs.
 
 Set your credentials as environment variables:
 
@@ -522,10 +524,6 @@ Notes:
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Related Projects
 
