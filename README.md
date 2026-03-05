@@ -521,6 +521,25 @@ Notes:
 - For best reliability and startup speed, prefer onedir mode.
 - UI startup window state (maximized/full-size on launch) is controlled in `src/mtu/ui.py` and applies to both source and packaged builds.
 
+### Unsigned Distributables (Temporary)
+
+Current distributed binaries are unsigned. Until code signing is enabled, you may see an OS trust warning.
+
+Windows (SmartScreen):
+
+1. In the "Windows protected your PC" dialog, click **More info**.
+2. Confirm the app source/path, then click **Run anyway**.
+
+Linux:
+
+- There is no SmartScreen-style prompt, but your desktop/session may warn about unknown publishers.
+- Make the app executable if needed: `chmod +x <binary>`.
+
+Signing note:
+
+- Windows Authenticode signing (PFX certificate) and Linux signing/notarization are separate systems.
+- Do **not** expect the same Windows signing keys/certificate to satisfy Linux distribution signing requirements.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
