@@ -396,7 +396,7 @@ jobs:
           generate_release_notes: false
           files: |
             dist/*.whl
-            dist/*.tar.gz
+            dist/mtu-*.tar.gz
             dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-linux-portable.tar.gz
             dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-portable.zip
 
