@@ -1,6 +1,6 @@
 # Mapbox Tileset Uploader
 
-A CLI tool and Python library to upload GIS data to Mapbox as vector tilesets. Supports multiple geospatial formats with a modular architecture.
+Mapbox Tileset Uploader (`mtu`) is a Python package for preparing and publishing GIS data to Mapbox vector tilesets. It provides three interfaces: a CLI, a Python API, and a desktop UI. The project includes a modular converter pipeline that normalizes supported GIS formats to GeoJSON before validation, recipe creation, and tileset publishing.
 
 [![PyPI version](https://img.shields.io/pypi/v/mtu.svg)](https://pypi.org/project/mtu/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mtu.svg)](https://pypi.org/project/mtu/)
@@ -555,7 +555,7 @@ When `dry_run` is `false`, the workflow will:
 
 1. Bump version in `pyproject.toml` and push commit
 2. Build Python distributions (`.whl`, `.tar.gz`)
-3. Build Windows desktop app and package `ROSEA-MTU-portable.zip`
+3. Build Linux and Windows desktop portable artifacts
 4. Create a GitHub Release and attach all artifacts
 5. Publish the Python package to PyPI (if PyPI environment is configured)
 
@@ -563,10 +563,14 @@ Release assets include:
 
 - Wheel: `*.whl`
 - Source dist: `*.tar.gz`
-- Portable desktop app: `ROSEA-MTU-portable.zip`
+- Linux portable archive: `ROSEA-MTU-v<version>-linux-portable.tar.gz`
+- Windows portable app: `ROSEA-MTU-v<version>-portable.zip`
 
-The portable ZIP is versioned on releases as:
+The Windows portable ZIP is versioned on releases as:
 `ROSEA-MTU-v<version>-portable.zip`
+
+The Linux portable archive is versioned on releases as:
+`ROSEA-MTU-v<version>-linux-portable.tar.gz`
 
 ### Setup
 

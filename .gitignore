@@ -26,6 +26,8 @@ wheels/
 venv/
 ENV/
 env/
+.mtu-winbuild/
+.winbuild-venv/
 
 # IDE
 .idea/
@@ -51,3 +53,6 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+
+# Local desktop packaging artifacts
+*.spec
