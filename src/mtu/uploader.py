@@ -707,8 +707,22 @@ class TilesetUploader:
             if not stderr and isinstance(stderr_bytes, (bytes, bytearray)):
                 stderr = stderr_bytes.decode("utf-8", errors="replace")
 
-            if result.exit_code != 0 and not stderr and result.exception is not None:
-                stderr = str(result.exception)
+            if result.exit_code != 0 and result.exception is not None:
+                exception_text = str(result.exception).strip()
+                is_click_exit = isinstance(result.exception, click.exceptions.Exit)
+
+                # click.exceptions.Exit often stringifies to just "1" and hides
+                # the real diagnostic emitted to stdout by mapbox-tilesets.
+                if (
+                    not stderr
+                    and exception_text
+                    and not (is_click_exit and exception_text.isdigit())
+                ):
+                    stderr = exception_text
+
+            if stderr.strip().isdigit() and stdout.strip():
+                stderr = ""
+
             return subprocess.CompletedProcess(
                 args=["tilesets"] + args,
                 returncode=result.exit_code,
@@ -777,11 +791,24 @@ class TilesetUploader:
             if config.description:
                 args.extend(["--description", config.description])
             if config.attribution:
-                args.extend(["--attribution", config.attribution])
+                args.extend(["--attribution", self._normalize_attribution(config.attribution)])
 
             self._run_tilesets_command(args)
         finally:
             os.unlink(recipe_path)
+
+    @staticmethod
+    def _normalize_attribution(attribution: str) -> str:
+        """Return CLI-ready attribution JSON, accepting legacy plain-text input."""
+        raw = attribution.strip()
+        if not raw:
+            return ""
+
+        try:
+            json.loads(raw)
+            return raw
+        except json.JSONDecodeError:
+            return json.dumps([{"text": raw}], ensure_ascii=False)
 
     def _update_recipe(self, tileset_id: str, recipe: dict[str, Any]) -> None:
         """Update tileset recipe."""

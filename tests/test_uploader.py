@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import click
 import pytest
 
 from mtu.uploader import (
@@ -257,6 +258,27 @@ class TestTilesetUploader:
         assert result.returncode == 0
         assert result.stdout == "ok"
 
+    def test_run_tilesets_inprocess_prefers_stdout_over_numeric_exit_exception(self) -> None:
+        """Test that click Exit code text doesn't mask useful stdout diagnostics."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader.access_token = "test-token"
+
+        click_exit = click.exceptions.Exit(1)
+        invoke_result = SimpleNamespace(
+            exit_code=1,
+            exception=click_exit,
+            output="Unable to parse attribution JSON\n",
+            stdout="",
+            stderr="1",
+        )
+
+        with patch("click.testing.CliRunner.invoke", return_value=invoke_result):
+            result = uploader._run_tilesets_inprocess(["create"])
+
+        assert result.returncode == 1
+        assert result.stdout == "Unable to parse attribution JSON\n"
+        assert result.stderr == ""
+
     def test_run_tilesets_command_falls_back_to_inprocess_on_cli_exit_attribute_error(self) -> None:
         """Test fallback to in-process execution when external CLI has click.exit issue."""
         uploader = TilesetUploader.__new__(TilesetUploader)
@@ -327,6 +349,16 @@ class TestTilesetUploader:
         ):
             with pytest.raises(ValueError, match="current upload cap of 1 GB"):
                 uploader._validate_source_file_size(Path("dummy.geojson"), label="Input file")
+
+    def test_normalize_attribution_wraps_plain_text(self) -> None:
+        """Test plain text attribution is converted to mapbox-tilesets JSON format."""
+        normalized = TilesetUploader._normalize_attribution("OpenStreetMap contributors")
+        assert normalized == '[{"text": "OpenStreetMap contributors"}]'
+
+    def test_normalize_attribution_keeps_json(self) -> None:
+        """Test valid JSON attribution is preserved as-is."""
+        attribution_json = '[{"text":"OSM","link":"https://www.openstreetmap.org"}]'
+        assert TilesetUploader._normalize_attribution(attribution_json) == attribution_json
 
 
 class TestUploadResult:
