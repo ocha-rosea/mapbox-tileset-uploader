@@ -643,7 +643,12 @@ class TilesetUploader:
         env = {"MAPBOX_ACCESS_TOKEN": self.access_token or ""}
 
         try:
-            result = runner.invoke(tilesets_cli, args, env=env, catch_exceptions=True)
+            result = runner.invoke(
+                tilesets_cli,
+                args,
+                env=env,
+                catch_exceptions=True,
+            )
 
             if (
                 result.exit_code != 0
@@ -662,13 +667,26 @@ class TilesetUploader:
                 had_click_exit = hasattr(click, "exit")
                 setattr(click, "exit", _click_exit_compat)
                 try:
-                    result = runner.invoke(tilesets_cli, args, env=env, catch_exceptions=True)
+                    result = runner.invoke(
+                        tilesets_cli,
+                        args,
+                        env=env,
+                        catch_exceptions=True,
+                    )
                 finally:
                     if not had_click_exit:
                         delattr(click, "exit")
 
             stdout = getattr(result, "stdout", "") or result.output
-            stderr = getattr(result, "stderr", "")
+            try:
+                stderr = getattr(result, "stderr", "") or ""
+            except Exception:
+                stderr = ""
+
+            stderr_bytes = getattr(result, "stderr_bytes", None)
+            if not stderr and isinstance(stderr_bytes, (bytes, bytearray)):
+                stderr = stderr_bytes.decode("utf-8", errors="replace")
+
             if result.exit_code != 0 and not stderr and result.exception is not None:
                 stderr = str(result.exception)
             return subprocess.CompletedProcess(
