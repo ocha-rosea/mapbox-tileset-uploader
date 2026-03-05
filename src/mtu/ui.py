@@ -666,7 +666,7 @@ class MTUDesktopApp:
             command=self._start_upload,
             style="Primary.TButton",
         )
-        self.upload_button.pack(anchor="e", padx=(0, 8))
+        self.upload_button.pack(anchor="center")
 
         log_frame = ttk.LabelFrame(container, text="Status", padding=10, style="App.TLabelframe")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -755,7 +755,7 @@ class MTUDesktopApp:
             (
                 "Before you start",
                 [
-                    "- Default zoom is 6-10 (Mapbox supports 0-22)",
+                    "- Default zoom is 0-10 (Mapbox supports 0-22)",
                     "- Token scopes: tilesets:read, tilesets:write, tilesets:list",
                     "- Ensure your input data and naming are final before upload",
                 ],
@@ -818,9 +818,7 @@ class MTUDesktopApp:
     def _start_main_page(self) -> None:
         self.intro_page.pack_forget()
         self.main_page.pack(fill=tk.BOTH, expand=True)
-        if not self.preflight_started:
-            self.preflight_started = True
-            self.preflight_ok = self._run_preflight_checks(show_dialog=True)
+        self.preflight_started = True
 
     def _go_to_welcome_page(self) -> None:
         if self.upload_thread and self.upload_thread.is_alive():
@@ -1100,6 +1098,7 @@ class MTUDesktopApp:
                 text=True,
                 check=False,
                 timeout=10,
+                **self._subprocess_no_window_kwargs(),
             )
         except Exception as exc:
             self._append_log(f"Preflight failed: could not execute tilesets CLI ({exc}).")
@@ -1129,6 +1128,19 @@ class MTUDesktopApp:
         self._append_log(f"Preflight OK: tilesets CLI available via: {resolved_cmd}")
         self.upload_button.configure(state=tk.NORMAL)
         return True
+
+    @staticmethod
+    def _subprocess_no_window_kwargs() -> dict[str, Any]:
+        if os.name != "nt":
+            return {}
+
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        return {
+            "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+            "startupinfo": startupinfo,
+        }
 
     @staticmethod
     def _safe_int(value: str, fallback: int) -> int:

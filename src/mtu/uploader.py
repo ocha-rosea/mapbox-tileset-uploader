@@ -181,6 +181,19 @@ class TilesetUploader:
         return True
 
     @staticmethod
+    def _subprocess_no_window_kwargs() -> dict[str, Any]:
+        if os.name != "nt":
+            return {}
+
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        return {
+            "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+            "startupinfo": startupinfo,
+        }
+
+    @staticmethod
     def _is_working_tilesets_command(command: list[str]) -> bool:
         """Check if a tilesets command can execute."""
         if bool(getattr(sys, "frozen", False)) and command:
@@ -196,6 +209,7 @@ class TilesetUploader:
                 text=True,
                 check=False,
                 timeout=10,
+                **TilesetUploader._subprocess_no_window_kwargs(),
             )
         except Exception:
             return False
@@ -544,6 +558,7 @@ class TilesetUploader:
                     text=True,
                     check=False,
                     timeout=timeout,
+                    **self._subprocess_no_window_kwargs(),
                 )
             except subprocess.TimeoutExpired as exc:
                 cmd_preview = " ".join(cmd)
@@ -617,20 +632,41 @@ class TilesetUploader:
 
     def _run_tilesets_inprocess(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         """Run mapbox-tilesets via Click in-process."""
+        import click
         from mapbox_tilesets.scripts.cli import cli as tilesets_cli
 
         runner = CliRunner()
         env = {"MAPBOX_ACCESS_TOKEN": self.access_token or ""}
 
         try:
-            result = runner.invoke(
-                tilesets_cli,
-                args,
-                env=env,
-                catch_exceptions=False,
-            )
+            result = runner.invoke(tilesets_cli, args, env=env, catch_exceptions=True)
+
+            if (
+                result.exit_code != 0
+                and isinstance(result.exception, AttributeError)
+                and "exit" in str(result.exception).lower()
+            ):
+
+                def _click_exit_compat(code: object = 0) -> None:
+                    if isinstance(code, str):
+                        click.echo(code)
+                        raise click.exceptions.Exit(0)
+                    if isinstance(code, int):
+                        raise click.exceptions.Exit(code)
+                    raise click.exceptions.Exit(1)
+
+                had_click_exit = hasattr(click, "exit")
+                setattr(click, "exit", _click_exit_compat)
+                try:
+                    result = runner.invoke(tilesets_cli, args, env=env, catch_exceptions=True)
+                finally:
+                    if not had_click_exit:
+                        delattr(click, "exit")
+
             stdout = getattr(result, "stdout", "") or result.output
             stderr = getattr(result, "stderr", "")
+            if result.exit_code != 0 and not stderr and result.exception is not None:
+                stderr = str(result.exception)
             return subprocess.CompletedProcess(
                 args=["tilesets"] + args,
                 returncode=result.exit_code,

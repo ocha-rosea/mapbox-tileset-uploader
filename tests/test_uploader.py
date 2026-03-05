@@ -227,6 +227,36 @@ class TestTilesetUploader:
             with pytest.raises(RuntimeError, match="timed out"):
                 uploader._run_tilesets_command(["status", "user.test"], timeout=1)
 
+    def test_run_tilesets_inprocess_retries_click_exit_attribute_error(self) -> None:
+        """Test retry path when click.exit AttributeError occurs in-process."""
+        uploader = TilesetUploader.__new__(TilesetUploader)
+        uploader.access_token = "test-token"
+
+        first_result = SimpleNamespace(
+            exit_code=1,
+            exception=AttributeError("module 'click' has no attribute 'exit'"),
+            output="",
+            stdout="",
+            stderr="",
+        )
+        second_result = SimpleNamespace(
+            exit_code=0,
+            exception=None,
+            output="ok",
+            stdout="ok",
+            stderr="",
+        )
+
+        with patch(
+            "click.testing.CliRunner.invoke",
+            side_effect=[first_result, second_result],
+        ) as invoke:
+            result = uploader._run_tilesets_inprocess(["--help"])
+
+        assert invoke.call_count == 2
+        assert result.returncode == 0
+        assert result.stdout == "ok"
+
     def test_validate_source_file_size_allows_limit(self) -> None:
         """Test that files at limit are accepted."""
         uploader = TilesetUploader.__new__(TilesetUploader)
