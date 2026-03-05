@@ -7,6 +7,8 @@ Mapbox Tileset Uploader (`mtu`) is a Python package for preparing and publishing
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/mtu.svg)](https://pypi.org/project/mtu/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+Releases: https://github.com/ocha-rosea/mapbox-tileset-uploader/releases
+
 ## Features
 
 
