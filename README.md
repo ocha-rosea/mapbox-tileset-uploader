@@ -172,6 +172,13 @@ export MAPBOX_ACCESS_TOKEN="your-token-here"
 export MAPBOX_USERNAME="your-username"
 ```
 
+### Capacity Units Warning (Free Accounts)
+
+- Mapbox Capacity Units (CU) can be consumed quickly by large datasets, frequent republishes, and high zoom ranges.
+- **Free accounts have limited CU quotas** and can hit limits or charges faster than expected.
+- Start with small samples, use conservative zoom ranges, and avoid repeated full republishes.
+- Check your Mapbox usage dashboard before large or repeated uploads.
+
 ## CLI Usage
 
 The CLI command is `mtu`.
