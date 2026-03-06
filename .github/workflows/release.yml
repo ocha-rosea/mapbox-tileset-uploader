@@ -321,35 +321,10 @@ jobs:
       - name: Sign Windows executable (optional)
         shell: pwsh
         env:
-          WINDOWS_CERT_BASE64: ${{ secrets['WINDOWS_CERT_BASE64'] }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets['WINDOWS_CERT_PASSWORD'] }}
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PASSWORD)) {
-            Write-Host "Skipping code signing: WINDOWS_CERT_BASE64 or WINDOWS_CERT_PASSWORD not configured."
-            exit 0
-          }
-
-          $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes(
-            $certPath,
-            [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
-          )
-
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-
-          if (-not $signtool) {
-            throw "signtool.exe not found on runner"
-          }
-
-          & $signtool.FullName sign \
-            /fd SHA256 \
-            /f $certPath \
-            /p $env:WINDOWS_CERT_PASSWORD \
-            /tr http://timestamp.digicert.com \
-            /td SHA256 \
-            "dist/mtu-desktop/mtu-desktop.exe"
+          ./scripts/sign_windows_artifacts.ps1 -FilePath "dist/mtu-desktop/mtu-desktop.exe" -AllowFailure
 
       - name: Create portable zip
         shell: pwsh
@@ -361,6 +336,21 @@ jobs:
           $zipName = "ROSEA-MTU-v$version-portable.zip"
           Compress-Archive -Path "dist/mtu-desktop/*" -DestinationPath ("dist/" + $zipName) -Force
           echo "zip_name=$zipName" >> $env:GITHUB_ENV
+
+      - name: Build per-user installer
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $version = "${{ needs.version-bump.outputs.new_version }}"
+          ./scripts/build_windows_installer.ps1 -AppVersion $version
+
+      - name: Upload windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-setup-user.exe
 
       - name: Upload windows artifact
         uses: actions/upload-artifact@v4
@@ -419,6 +409,12 @@ jobs:
           name: windows-portable
           path: dist/
 
+      - name: Download Windows user installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -432,6 +428,7 @@ jobs:
             dist/mtu-*.tar.gz
             dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-linux-portable.tar.gz
             dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-portable.zip
+            dist/ROSEA-MTU-v${{ needs.version-bump.outputs.new_version }}-setup-user.exe
 
   publish-pypi:
     name: Publish to PyPI

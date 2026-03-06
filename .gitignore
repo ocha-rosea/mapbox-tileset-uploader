@@ -28,6 +28,7 @@ ENV/
 env/
 .mtu-winbuild/
 .winbuild-venv/
+.venv-winbuild/
 
 # IDE
 .idea/

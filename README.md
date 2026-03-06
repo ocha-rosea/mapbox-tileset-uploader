@@ -9,6 +9,11 @@ Mapbox Tileset Uploader (`mtu`) is a Python package for preparing and publishing
 
 Releases: https://github.com/ocha-rosea/mapbox-tileset-uploader/releases
 
+Notebook (shared workflow):
+- Download: https://raw.githubusercontent.com/ocha-rosea/mapbox-tileset-uploader/main/notebooks/mtu_shared_workflow.ipynb
+- View in repo: https://github.com/ocha-rosea/mapbox-tileset-uploader/blob/main/notebooks/mtu_shared_workflow.ipynb
+- Open in Colab: https://colab.research.google.com/github/ocha-rosea/mapbox-tileset-uploader/blob/main/notebooks/mtu_shared_workflow.ipynb
+
 ## Features
 
 
@@ -477,7 +482,9 @@ You can package the desktop UI as a self-contained Windows executable using PyIn
 Use a non-conda CPython interpreter (python.org build). Conda-based interpreters can produce
 `_tkinter` DLL load failures in packaged apps.
 
-Suggested setup:
+### Environment Setup Options
+
+#### Option A: Custom clean venv (recommended for packaging)
 
 ```powershell
 winget install -e --id Python.Python.3.11
@@ -491,10 +498,52 @@ From the project root:
 ./scripts/build_windows_exe.ps1 -PythonPath C:\Users\<you>\mtu-winbuild\Scripts\python.exe
 ```
 
+#### Option B: ArcGIS Pro cloned environment (for ArcGIS stack compatibility)
+
+Clone `arcgispro-py3` first, then install MTU into the clone:
+
+```powershell
+conda create --name arcgispro-mtu --clone arcgispro-py3
+conda activate arcgispro-mtu
+python -m pip install --upgrade pip
+python -m pip install -e ".[all]"
+```
+
+Then build with the cloned environment interpreter:
+
+```powershell
+./scripts/build_windows_exe.ps1 -PythonPath C:\Users\<you>\anaconda3\envs\arcgispro-mtu\python.exe
+```
+
+If your clone lives under the ArcGIS Pro managed env location, use that `python.exe` path instead.
+
 PyInstaller may generate `.spec` files during local packaging. These are optional build recipes;
 the project build script above does not require committing them.
 
 This creates a self-contained app in `dist/mtu-desktop/` (recommended, onedir mode).
+
+To create a per-user installer (installs under `%LOCALAPPDATA%\\Programs` and does not require admin rights):
+
+1. Install Inno Setup 6.
+2. Build the desktop app folder with `scripts/build_windows_exe.ps1`.
+3. Build the installer:
+
+```powershell
+./scripts/build_windows_installer.ps1 -AppVersion 1.2.3
+```
+
+Output:
+
+```text
+dist/ROSEA-MTU-v1.2.3-setup-user.exe
+```
+
+Optional signing for local build and CI:
+
+- Set `WINDOWS_CERT_BASE64` to a Base64-encoded PFX.
+- Set `WINDOWS_CERT_PASSWORD` to the PFX password.
+- The build uses `scripts/sign_windows_artifacts.ps1` for executable signing and an Inno Setup `SignTool` hook for installer/uninstaller signing.
+- If cert variables are missing or signing fails, current scripts are configured to continue without signature.
 
 To create a portable ZIP (shareable folder build):
 
@@ -541,6 +590,8 @@ Signing note:
 
 - Windows Authenticode signing (PFX certificate) and Linux signing/notarization are separate systems.
 - Do **not** expect the same Windows signing keys/certificate to satisfy Linux distribution signing requirements.
+- Let's Encrypt certificates are TLS certificates and cannot be used for Windows Authenticode code signing.
+- You cannot sign with certificates from other installed products unless you control/export their private key (which is typically non-exportable).
 
 ## License
 
