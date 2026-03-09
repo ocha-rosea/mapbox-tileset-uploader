@@ -14,6 +14,10 @@ Notebook (shared workflow):
 - View in repo: https://github.com/ocha-rosea/mapbox-tileset-uploader/blob/main/notebooks/mtu_shared_workflow.ipynb
 - Open in Colab: https://colab.research.google.com/github/ocha-rosea/mapbox-tileset-uploader/blob/main/notebooks/mtu_shared_workflow.ipynb
 
+GitHub Pages (zoom estimator):
+- App URL: https://ocha-rosea.github.io/mapbox-tileset-uploader/
+- Source: `docs/`
+
 ## Features
 
 
@@ -23,9 +27,29 @@ Notebook (shared workflow):
 - **Remote sources**: download and upload from URLs
 - **Conversion pipeline**: automatic format detection and conversion to GeoJSON
 - **Configurable output**: zoom levels, layer names, and recipes
+- **Zoom estimator web app**: upload GeoJSON, compare min/max zoom ranges, and preview tile coverage on a map before running CLI/Notebook publishing
 - **Upload guardrails**: default 1 GB upload cap across UI, CLI, and API (optional full-cap mode up to Mapbox's 20 GB per-file limit); backend always enforces Mapbox's hard 20 GB limit
 - **Interfaces**: CLI, Python API, and desktop UI
 - **Architecture**: modular converter system with optional dependencies
+
+## Zoom Estimator (GitHub Pages)
+
+The GitHub Pages app helps estimate how zoom ranges affect tile coverage before creating a Mapbox tileset.
+
+Features:
+
+- Upload local GeoJSON (`.geojson` or `.json`)
+- Set `min zoom` and `max zoom` (`0-22`)
+- Use presets aligned with project defaults:
+  - CLI default: `0-10`
+  - Notebook default: `4-8`
+- Preview estimated tile coverage by zoom level
+- Visualize source geometry, bounds, and tile grid overlay at a selected preview zoom
+
+Notes:
+
+- Estimates are based on Web Mercator tile coverage over the source bounding box.
+- Actual tile density and Mapbox CU consumption can vary by geometry complexity and recipe settings.
 
 ## Installation
 

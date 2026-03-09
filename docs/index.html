@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MTU Zoom Estimator</title>
+    <meta
+      name="description"
+      content="Estimate min/max zoom levels for Mapbox tilesets and preview tile coverage before publishing."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="background-noise" aria-hidden="true"></div>
+    <main class="app-shell">
+      <section class="panel intro-panel">
+        <p class="eyebrow">Mapbox Tileset Uploader</p>
+        <h1>Zoom Estimator</h1>
+        <p class="lead">
+          Upload a GeoJSON file, choose min/max zoom levels, and preview tile coverage before running the CLI or notebook workflow.
+        </p>
+        <div class="preset-row">
+          <button id="presetCli" class="ghost-btn" type="button">Use CLI defaults (0-10)</button>
+          <button id="presetNotebook" class="ghost-btn" type="button">Use Notebook defaults (4-8)</button>
+        </div>
+      </section>
+
+      <section class="panel controls-panel">
+        <h2>Input</h2>
+        <label class="file-drop" for="fileInput" id="dropZone">
+          <input id="fileInput" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+          <strong>Drop a GeoJSON file here</strong>
+          <span>or click to browse</span>
+        </label>
+
+        <div class="control-grid">
+          <label>
+            Min zoom
+            <input id="minZoom" type="number" min="0" max="22" value="4" />
+          </label>
+          <label>
+            Max zoom
+            <input id="maxZoom" type="number" min="0" max="22" value="8" />
+          </label>
+          <label class="wide-control">
+            Preview zoom
+            <input id="previewZoom" type="range" min="0" max="22" value="6" />
+            <span id="previewZoomValue" class="mono">6</span>
+          </label>
+        </div>
+
+        <div id="messages" class="messages" role="status" aria-live="polite"></div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Features</span>
+            <span id="featureCount" class="stat-value">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Bounds</span>
+            <span id="boundsValue" class="stat-value mono">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Tiles at min zoom</span>
+            <span id="tilesMin" class="stat-value">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Tiles at max zoom</span>
+            <span id="tilesMax" class="stat-value">-</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel map-panel">
+        <h2>Preview</h2>
+        <div id="map" class="map-canvas" aria-label="Map preview"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <h2>Zoom breakdown</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Zoom</th>
+              <th>Tile count</th>
+              <th>World share</th>
+            </tr>
+          </thead>
+          <tbody id="zoomTableBody">
+            <tr>
+              <td colspan="3" class="empty-row">Upload a file to see estimates.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
