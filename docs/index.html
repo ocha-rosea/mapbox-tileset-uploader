@@ -55,7 +55,7 @@
             <input id="maxZoom" type="number" min="0" max="22" value="8" />
           </label>
           <label class="wide-control">
-            Preview zoom
+            Preview / map zoom
             <input id="previewZoom" type="range" min="0" max="22" value="6" />
             <span id="previewZoomValue" class="mono">6</span>
           </label>
@@ -79,6 +79,14 @@
           <div class="stat-card">
             <span class="stat-label">Tiles at max zoom</span>
             <span id="tilesMax" class="stat-value">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Current preview zoom</span>
+            <span id="currentPreviewZoom" class="stat-value mono">6</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Layer visibility</span>
+            <span id="visibilityState" class="stat-value">-</span>
           </div>
         </div>
       </section>

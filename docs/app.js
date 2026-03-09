@@ -22,6 +22,8 @@ const featureCountEl = document.getElementById("featureCount");
 const boundsEl = document.getElementById("boundsValue");
 const tilesMinEl = document.getElementById("tilesMin");
 const tilesMaxEl = document.getElementById("tilesMax");
+const currentPreviewZoomEl = document.getElementById("currentPreviewZoom");
+const visibilityStateEl = document.getElementById("visibilityState");
 
 function initializeMap() {
   state.map = L.map("map", { zoomControl: true }).setView([20, 0], 2);
@@ -50,6 +52,36 @@ function getZoomRange() {
   }
 
   return { minZoom, maxZoom };
+}
+
+function setLayerVisibility(layer, visible) {
+  if (!layer || !state.map) {
+    return;
+  }
+
+  const hasLayer = state.map.hasLayer(layer);
+  if (visible && !hasLayer) {
+    layer.addTo(state.map);
+  }
+
+  if (!visible && hasLayer) {
+    layer.remove();
+  }
+}
+
+function updateDataVisibility(range, previewZoom) {
+  if (!state.geoLayer || !state.boundsLayer) {
+    visibilityStateEl.textContent = "No data";
+    return;
+  }
+
+  const inRange = previewZoom >= range.minZoom && previewZoom <= range.maxZoom;
+  setLayerVisibility(state.geoLayer, inRange);
+  setLayerVisibility(state.boundsLayer, inRange);
+
+  visibilityStateEl.textContent = inRange
+    ? `Visible at z${previewZoom}`
+    : `Hidden at z${previewZoom}`;
 }
 
 function countFeatures(geojson) {
@@ -223,6 +255,7 @@ function refreshGrid() {
 
   const previewZoom = clampZoom(previewZoomInput.value);
   previewZoomValue.textContent = String(previewZoom);
+  currentPreviewZoomEl.textContent = String(previewZoom);
 
   const estimate = estimateTileCoverage(state.bounds, previewZoom);
 
@@ -263,10 +296,14 @@ function refreshAll() {
     return;
   }
 
-  showMessage("Estimates updated.");
+  const previewZoom = clampZoom(previewZoomInput.value);
+  const inRange = previewZoom >= range.minZoom && previewZoom <= range.maxZoom;
+  const visibilitySummary = inRange ? "visible" : "hidden";
+  showMessage(`Estimates updated. Data is ${visibilitySummary} at z${previewZoom}.`);
   updateSummary(range);
   updateZoomTable(range);
   refreshGrid();
+  updateDataVisibility(range, previewZoom);
 }
 
 function drawGeojson() {
@@ -378,8 +415,33 @@ function wireEvents() {
   });
 
   previewZoomInput.addEventListener("input", () => {
-    previewZoomValue.textContent = String(clampZoom(previewZoomInput.value));
+    const nextZoom = clampZoom(previewZoomInput.value);
+    previewZoomValue.textContent = String(nextZoom);
+    currentPreviewZoomEl.textContent = String(nextZoom);
+    if (state.map && Math.round(state.map.getZoom()) !== nextZoom) {
+      state.map.setZoom(nextZoom);
+    }
+    refreshAll();
+  });
+
+  state.map.on("zoomend", () => {
+    const mapZoom = clampZoom(Math.round(state.map.getZoom()));
+    if (clampZoom(previewZoomInput.value) !== mapZoom) {
+      previewZoomInput.value = String(mapZoom);
+      previewZoomValue.textContent = String(mapZoom);
+      currentPreviewZoomEl.textContent = String(mapZoom);
+    }
+
+    const range = getZoomRange();
+    if (!range) {
+      return;
+    }
+
     refreshGrid();
+    updateDataVisibility(range, mapZoom);
+    const inRange = mapZoom >= range.minZoom && mapZoom <= range.maxZoom;
+    const visibilitySummary = inRange ? "visible" : "hidden";
+    showMessage(`Map zoom z${mapZoom}. Data is ${visibilitySummary} for range ${range.minZoom}-${range.maxZoom}.`);
   });
 
   const preventDefaults = (event) => {
