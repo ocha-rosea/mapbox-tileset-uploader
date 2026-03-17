@@ -33,10 +33,36 @@ if (-not $resolvedIscc) {
 }
 
 Write-Host "Building per-user installer with Inno Setup..."
-& $resolvedIscc "/DMyAppVersion=$AppVersion" $issScript
+
+$hasSigningEnv =
+    -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64) -and
+    -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PASSWORD)
+$enableSigning = if ($hasSigningEnv) { 1 } else { 0 }
+
+if ($enableSigning -eq 1) {
+    Write-Host "Signing is enabled for installer build."
+}
+else {
+    Write-Host "Signing is disabled for installer build (certificate env vars are missing)."
+}
+
+$isccArgs = @(
+    "/DMyAppVersion=$AppVersion"
+    "/DEnableSigning=$enableSigning"
+    $issScript
+)
+
+& $resolvedIscc @isccArgs
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Inno Setup build failed with exit code $LASTEXITCODE"
+    if ($enableSigning -eq 1) {
+        Write-Warning "Signed Inno Setup build failed with exit code $LASTEXITCODE. Retrying without signing."
+        & $resolvedIscc "/DMyAppVersion=$AppVersion" "/DEnableSigning=0" $issScript
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup build failed with exit code $LASTEXITCODE"
+    }
 }
 
 Write-Host "Installer build complete. See dist\\ROSEA-MTU-v$AppVersion-setup-user.exe"
