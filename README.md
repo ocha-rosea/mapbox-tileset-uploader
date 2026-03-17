@@ -94,6 +94,13 @@ pip install -e ".[all]"
 
 ## Supported Formats
 
+All converters normalize output to JSON-safe GeoJSON values before validation/upload. This includes:
+
+- Date/time-like values converted to ISO-8601 strings
+- Non-finite numbers handled safely
+- Binary and unsupported property types converted with explicit warnings
+- Clear, format-specific conversion errors for invalid inputs
+
 | Format | Extensions | Dependencies | Notes |
 | ------ | ---------- | ------------ | ----- |
 | GeoJSON | `.geojson`, `.json` | None | Native support |

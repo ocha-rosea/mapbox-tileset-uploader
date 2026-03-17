@@ -69,6 +69,8 @@ class GeoParquetConverter(BaseConverter):
 
         # Convert to GeoJSON
         geojson = json.loads(gdf.to_json())
+        geojson, norm_warnings = self.normalize_geojson_for_json(geojson)
+        warnings.extend(norm_warnings)
 
         return ConversionResult(
             geojson=geojson,

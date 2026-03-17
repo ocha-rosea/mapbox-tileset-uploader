@@ -78,6 +78,8 @@ class FlatGeobufConverter(BaseConverter):
             raise ValueError(f"Failed to read FlatGeobuf: {e}")
 
         geojson = {"type": "FeatureCollection", "features": features}
+        geojson, norm_warnings = self.normalize_geojson_for_json(geojson)
+        warnings.extend(norm_warnings)
 
         return ConversionResult(
             geojson=geojson,

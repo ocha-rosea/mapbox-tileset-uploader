@@ -46,6 +46,8 @@ class GeoJSONConverter(BaseConverter):
         # Normalize to FeatureCollection
         geojson, norm_warnings = self._normalize_geojson(geojson)
         warnings.extend(norm_warnings)
+        geojson, norm_warnings = self.normalize_geojson_for_json(geojson)
+        warnings.extend(norm_warnings)
 
         feature_count = len(geojson.get("features", []))
 

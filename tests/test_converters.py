@@ -2,6 +2,8 @@
 
 import json
 import tempfile
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,12 @@ from mtu.converters import get_converter, get_supported_formats
 from mtu.converters.base import ConversionResult
 from mtu.converters.geojson import GeoJSONConverter
 from mtu.converters.topojson import TopoJSONConverter
+
+
+class _DummyConverter(GeoJSONConverter):
+    """Concrete converter for testing BaseConverter helpers."""
+
+    format_name = "DummyGeoJSON"
 
 
 class TestConverterRegistry:
@@ -361,3 +369,55 @@ class TestGeometryTypes:
         geom = result.geojson["features"][0]["geometry"]
         assert geom["type"] == "MultiPoint"
         assert len(geom["coordinates"]) == 2
+
+
+class TestJsonNormalization:
+    """Test JSON-safe normalization for converter outputs."""
+
+    def test_geojson_converter_normalizes_datetime_like_values(self) -> None:
+        """Date/time values should be serialized as ISO strings."""
+        converter = GeoJSONConverter()
+        geojson = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [0, 0]},
+                    "properties": {
+                        "created_on": date(2024, 5, 1),
+                        "observed_at": datetime(2024, 5, 1, 12, 30, tzinfo=timezone.utc),
+                    },
+                }
+            ],
+        }
+
+        result = converter.convert(geojson)
+        props = result.geojson["features"][0]["properties"]
+        assert props["created_on"] == "2024-05-01"
+        assert props["observed_at"] == "2024-05-01T12:30:00+00:00"
+
+    def test_normalize_geojson_for_json_handles_mixed_types(self) -> None:
+        """Mixed non-JSON-native values should be converted with warnings."""
+        converter = _DummyConverter()
+        normalized, warnings = converter.normalize_geojson_for_json(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [1, 2]},
+                        "properties": {
+                            "decimal": Decimal("10.5"),
+                            "tags": {"a", "b"},
+                            "blob": b"abc",
+                        },
+                    }
+                ],
+            }
+        )
+
+        props = normalized["features"][0]["properties"]
+        assert props["decimal"] == 10.5
+        assert sorted(props["tags"]) == ["a", "b"]
+        assert props["blob"] == "abc"
+        assert any("Binary value" in warning for warning in warnings)

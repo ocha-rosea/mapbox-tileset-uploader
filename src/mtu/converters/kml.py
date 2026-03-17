@@ -85,6 +85,8 @@ class KMLConverter(BaseConverter):
             raise ValueError(f"Failed to read KML: {e}")
 
         geojson = {"type": "FeatureCollection", "features": features}
+        geojson, norm_warnings = self.normalize_geojson_for_json(geojson)
+        warnings.extend(norm_warnings)
 
         return ConversionResult(
             geojson=geojson,
