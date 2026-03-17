@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mtu"
-version = "1.1.5"
+version = "1.1.6"
 description = "A CLI tool to upload GeoJSON, TopoJSON, Shapefile, GeoPackage, and other GIS formats to Mapbox as vector tilesets"
 readme = "README.md"
 license = "MIT"
